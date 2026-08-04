@@ -290,6 +290,117 @@ The tester will:
 5. Check for regressions in shared code
 6. Fix and `/commit-code` any failures, re-test until all pass
 
+### Phase 4.5: Inline Backend Validation (when browser auth is unavailable)
+
+When the dev server requires authentication (e.g. Google OAuth) and the browser can't sign in, run inline backend tests directly instead of relying on browser verification. Extract the core validation/display logic from the changed code and test it exhaustively with Node.js scripts.
+
+**What to test:**
+1. **API validation logic** — reproduce the server-side validation checks (type guards, range checks, null handling) and run every edge case: valid inputs, boundary values, type mismatches (string, boolean, NaN, Infinity, arrays, objects), negative values, fractional values, and overflow values.
+2. **Client-side input parsing** — reproduce the input → API-payload transformation (e.g. `parseInt`, empty-string-to-null, trim, same-value-noop) and test all user input scenarios.
+3. **Display/rendering logic** — reproduce the conditional rendering decisions (which status shows what, null vs set vs zero) and verify every combination of state.
+4. **Invariant enforcement** — verify that server-side invariants (e.g. probationary always clears a field) are applied in all code paths (PATCH, POST/reactivation, rollback).
+
+**How to run:**
+```bash
+node -e "
+function validate(input) { /* extract logic from route handler */ }
+const tests = [
+  { input: 0, expected: 'ok', desc: 'Zero' },
+  { input: -1, expected: 'error', desc: 'Negative' },
+  // ... all edge cases
+]
+let passed = 0, failed = 0
+for (const t of tests) {
+  const result = validate(t.input)
+  const pass = result === t.expected
+  if (!pass) { console.log('FAIL:', t.desc); failed++ }
+  else { console.log('PASS:', t.desc); passed++ }
+}
+console.log(passed + '/' + (passed+failed) + ' passed')
+"
+```
+
+Run this after the tester agent and before the E2E phase. Fix any failures before proceeding. This ensures backend correctness is verified even when browser-based E2E testing isn't possible.
+
+### Phase 4.75: E2E Testing with Playwright + Local Supabase
+
+Run end-to-end tests against a local Supabase instance using Docker and the project's E2E auth system. This phase exercises the full stack — API routes, database triggers, UI rendering — through real HTTP requests and headless Chromium.
+
+**Prerequisites:**
+- Docker must be running (the user should confirm this)
+- Supabase CLI installed (`supabase --version`)
+
+**Setup steps:**
+
+1. **Start local Supabase:**
+   ```bash
+   # Stop any conflicting instance first
+   supabase stop 2>/dev/null
+   supabase start
+   ```
+   Note the output keys: Project URL (`http://127.0.0.1:54321`), Publishable key, Secret key.
+
+   If `supabase start` fails with a `schema "analytics" does not exist` error, temporarily edit `supabase/config.toml` to remove `"analytics"` from the `schemas` array, start Supabase, then revert the edit (don't commit the change).
+
+2. **Run relevant migrations** — copy each migration file into the container and execute it:
+   ```bash
+   docker cp supabase/migrations/{migration}.sql supabase_db_tool-portal:/tmp/migration.sql
+   docker exec supabase_db_tool-portal psql -U postgres -d postgres -f /tmp/migration.sql
+   ```
+   Run all migrations relevant to the feature being tested, in chronological order. Piping via `stdin` to `docker exec` may silently fail — always use `docker cp` + `-f`.
+
+3. **Seed E2E data** — write a temporary seed script (in `scripts/`) that uses `@supabase/supabase-js` with the local service role key to:
+   - Create auth users via `supabase.auth.admin.createUser()` with `@vmgdigital.com` emails (required by the timekeeping auth domain allowlist)
+   - Insert profiles and roster data needed for the test scenarios
+   - Write the seed artifact to `tests/e2e/.seed/app-e2e-seed.json`
+   
+   Delete the seed script after running it — it's not committed.
+
+4. **Install Playwright browsers** (if not already present):
+   ```bash
+   bunx playwright install chromium
+   ```
+
+5. **Start dev server with E2E env vars** — add a temporary entry in `.claude/launch.json`:
+   ```json
+   {
+     "name": "tool-portal-e2e",
+     "runtimeExecutable": "bash",
+     "runtimeArgs": ["-lc", "APP_E2E_AUTH=1 APP_E2E_AUTH_TOKEN=local-dev-token NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321 NEXT_PUBLIC_SUPABASE_ANON_KEY={publishable_key} SUPABASE_SERVICE_ROLE_KEY={secret_key} bun dev --port 50551"],
+     "port": 50551
+   }
+   ```
+   Start via `preview_start({ name: "tool-portal-e2e" })`. Remove the entry after testing.
+
+6. **Write the Playwright test** at `tests/e2e/{feature-name}.pw.ts`:
+   - Import `e2eApiHeaders`, `isE2EAuthEnabled`, `login` from `./e2e-auth`
+   - Gate all tests with `test.skip(!isE2EAuthEnabled(), '...')`
+   - **API tests:** use `request.get/patch/post` with `e2eApiHeaders()` — test happy paths, validation rejections, invariant enforcement, boundary values
+   - **UI tests:** use `login(page)` then navigate and assert DOM state — column headers, input visibility, display values, conditional rendering
+
+7. **Run the tests:**
+   ```bash
+   APP_E2E_AUTH=1 \
+   APP_E2E_AUTH_TOKEN=local-dev-token \
+   NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321 \
+   NEXT_PUBLIC_SUPABASE_ANON_KEY={publishable_key} \
+   SUPABASE_SERVICE_ROLE_KEY={secret_key} \
+   PLAYWRIGHT_BASE_URL=http://localhost:50551 \
+   bunx playwright test tests/e2e/{feature-name}.pw.ts --project=chromium --reporter=list
+   ```
+
+8. **Fix failures and re-run** until all tests pass.
+
+9. **Cleanup:**
+   - Stop the E2E dev server
+   - Remove the temporary `launch.json` entry
+   - Delete temporary seed scripts
+   - Delete `test-results/` directory
+   - Keep the `.pw.ts` test file (it's committed with the feature)
+   - Optionally stop Supabase: `supabase stop`
+
+**E2E auth flow recap:** When `APP_E2E_AUTH=1` and the `x-app-e2e-auth` header matches `APP_E2E_AUTH_TOKEN`, `createServerAuthClient()` bypasses Google OAuth and signs in the seeded user via `signInWithPassword`. This only works when `NEXT_PUBLIC_SUPABASE_URL` points to localhost.
+
 ### Phase 5: Preview Review (latest changes only)
 
 Spawn the preview-reviewer for a quick pass on the latest changes:
