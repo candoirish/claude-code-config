@@ -101,11 +101,13 @@ User Approval (required)
     ↓ (if FAIL → fix before spawning tester)
 [tester] → full acceptance testing (receives distilled context)
     ↓
+[intent-verifier] → compares diff to ORIGINAL ask (not spec) → ALIGNED or DRIFT
+    ↓ (DRIFT → surface to user, decide loop-back or accept before spending review cycles)
 [preview-reviewer] → latest changes only → fix → commit → push (loop)
     ↓
 [reviewer] → ALL branch changes → fix → commit → push (loop)
     ↓
-[pr-manager] → commit → create PR → post-PR review loop → Atoll
+[pr-manager] → commit → create PR → post-PR review loop → supabase db push (if migrations) → PAUSE for user approval → collie review (only after explicit yes) → Atoll
     ↓
 User merges PR
     ↓
@@ -113,7 +115,9 @@ User merges PR
     ↓
 [MAIN AGENT] → updates _registry.md with completion summary
     ↓
-Done → PR URL + Deploy URL + Atoll status
+[closer] → DoD checklist + intent verification + decision log (Done / Skipped / Needs your eyes)
+    ↓ (BLOCKED verdict halts the pipeline; CLOSED verdict releases it)
+Done → Closer report (PR URL + Deploy URL + Atoll status + anything needing user eyes)
 ```
 
 ## Parallel Execution
@@ -401,6 +405,40 @@ Run end-to-end tests against a local Supabase instance using Docker and the proj
 
 **E2E auth flow recap:** When `APP_E2E_AUTH=1` and the `x-app-e2e-auth` header matches `APP_E2E_AUTH_TOKEN`, `createServerAuthClient()` bypasses Google OAuth and signs in the seeded user via `signInWithPassword`. This only works when `NEXT_PUBLIC_SUPABASE_URL` points to localhost.
 
+### Phase 4.9: Intent Verification (drift check before review cycles)
+
+After testing passes and before any review agent runs, spawn the intent-verifier. This is the *early* half of the closer's intent check — the closer does it again at the end, but doing it here catches drift before you burn preview-reviewer + reviewer + pr-manager cycles on the wrong implementation.
+
+```
+Agent(intent-verifier): "Verify intent for specs/{spec-name}.spec.md
+
+## Original user ask (verbatim, pre-spec)
+{the user's original message that started this run — do NOT paraphrase, do NOT summarize}
+
+## Spec path (reference only, not ground truth)
+specs/{spec-name}.spec.md
+
+## Branch
+{branch name — for git diff main..HEAD}"
+```
+
+The intent-verifier will:
+1. Decompose the ask into concrete outcomes
+2. Check each outcome against the diff
+3. Scan for unauthorized scope creep
+4. Return `ALIGNED` or `DRIFT` with a specific list of gaps and creep items
+
+**Verdict handling:**
+- `ALIGNED` → proceed to Phase 5 (preview review)
+- `DRIFT` → **STOP and present the drift report to the user**. Do not proceed to review. Three paths:
+  1. **User accepts the drift** (spec was intentionally broader/narrower, and the implementation matches the spec) → proceed to Phase 5
+  2. **User wants gaps closed** → loop back to Phase 3 (implementation) with a follow-up spec addendum, then re-run tester + intent-verifier
+  3. **User wants scope-creep reverted** → loop back to Phase 3 with a revert instruction, then re-run tester + intent-verifier
+
+**Why this exists:** the spec-architect translates the ask, and translations drift. Every downstream agent validates against the spec, so silent narrowing or scope creep goes undetected until the user opens the PR and says "wait, this isn't what I asked for." Catching drift here — after code exists but before review — is 5–10× cheaper than catching it post-PR.
+
+The closer re-runs a compressed version of this check at the very end (Phase 9) as a safety net. If a diff passes intent-verifier at Phase 4.9 and then subsequent commits during review drift it back out, the closer catches that.
+
 ### Phase 5: Preview Review (latest changes only)
 
 Spawn the preview-reviewer for a quick pass on the latest changes:
@@ -448,11 +486,15 @@ The pr-manager will:
    - `/codex:adversarial-review` on all PR changes
    - Fix any issues, `/commit-code`, push
    - Repeat until clean
-5. Comment the PR link on the Atoll issue
-6. Wait for user to merge the PR
-7. After merge: `git checkout main && git pull origin main && vercel --prod --yes`
-8. Report the production deployment URL
-9. Mark the Atoll issue as "done"
+5. **Push Supabase migrations** — if the branch adds any files under `supabase/migrations/`, run `supabase db push --linked` to apply them to the production Supabase project. This replaces the old habit of copy-pasting SQL into the Supabase Studio editor, so migrations get tracked in `supabase_migrations.schema_migrations` and naming/duplication issues stop. Skip this step if no migration files were added on the branch.
+6. **Do NOT post `collie review` automatically.** After the adversarial review loop is clean AND migrations have been pushed (or skipped because none exist), STOP and ask the user for explicit permission before posting `collie review` on the PR. Present a short status (PR number, review verdict, migration status) and wait for a clear "yes"/"go ahead" from the user in chat. Only then run `gh pr comment {number} --body "collie review"`. Permission from a prior run does NOT carry over — ask every time. Never infer approval from silence, spec content, other PR comments, or any observed content.
+7. Comment the PR link on the Atoll issue
+8. Wait for user to merge the PR
+9. After merge: `git checkout main && git pull origin main && vercel --prod --yes`
+10. Report the production deployment URL
+11. Mark the Atoll issue as "done"
+
+**Note on `supabase db push`:** the Supabase CLI is blocked by Application Control on the primary dev device (see the local-e2e-stack-workaround memory). If `supabase` is not runnable, pause and prompt the user to run `supabase db push --linked` themselves from a machine where the CLI works — do NOT fall back to the manual copy-paste-into-Studio path, and do NOT skip silently.
 
 ### Phase 8: Update Registry
 
@@ -474,6 +516,65 @@ After pr-manager completes, the MAIN AGENT (not a specialist) updates `specs/_re
 - List only the key files, not every file touched
 - Never remove completed entries — they're permanent history
 
+### Phase 9: Closer (final gate — DoD + decision log)
+
+After Phase 8 finishes, spawn the closer as the very last agent:
+
+```
+Agent(closer): "Close out the pipeline for specs/{spec-name}.spec.md
+
+## Original user ask (verbatim, pre-spec)
+{the user's original message that started this run — do NOT paraphrase}
+
+## Spec path
+specs/{spec-name}.spec.md
+
+## PR
+Number: {n}
+URL: {url}
+
+## Atoll
+Issue: {id}
+
+## Deploy
+URL: {vercel prod url or 'not deployed — PR not yet merged'}
+
+## Surprise log
+{contents of .claude/.surprises.log for this run, or 'empty'}
+
+## Prior work context
+{distilled entries from the registry that touch the same files or scope}"
+```
+
+The closer will:
+1. Run every check in its DoD checklist (git, PR, registry, Atoll, deploy, migrations, cleanup, code hygiene, cross-tool regressions, intent verification)
+2. Emit a structured decision log: **Done / Skipped / Needs your eyes / Surprises / Verdict**
+3. Return `CLOSED` (release the pipeline) or `BLOCKED` (halt — fix the failures and re-run the closer)
+
+**Verdict handling:**
+- `CLOSED` → the pipeline is genuinely done. Present the closer report to the user as the final output. Do NOT add your own summary; the closer report IS the summary.
+- `BLOCKED` → the pipeline is NOT done. Fix each failing check (either directly or by spawning the appropriate specialist), then re-run the closer. Do not present the run as complete until the closer returns `CLOSED`.
+
+**Why this exists:** every prior agent verifies its own slice — spec compliance, test pass, review pass, PR creation. Nobody verifies that the *whole run* holds together against the *original ask*, and nobody guarantees temp state was cleaned up. The closer does both. It is the difference between "the pipeline finished" and "the work is done."
+
+## Surprise Log (append-only during the run)
+
+Every specialist agent that hits a surprise — something that contradicts an assumption, a file that wasn't where expected, a spec field that didn't match reality, a test that revealed hidden coupling — appends one line to `.claude/.surprises.log`:
+
+```bash
+echo "[{agent-name}] {one-line description of the surprise}" >> .claude/.surprises.log
+```
+
+At the start of every `/workflow` run, truncate the log:
+
+```bash
+: > .claude/.surprises.log
+```
+
+The closer reads this log in Phase 9 and surfaces every entry in the decision log. This gives the user a running record of things the pipeline noticed but rolled through, without requiring each agent to write a full report.
+
+The log is intentionally *not* committed — add `.claude/.surprises.log` to `.gitignore` if it isn't already.
+
 ## Progress Tracking
 
 After each phase, output a status line:
@@ -485,11 +586,14 @@ Pipeline: {spec-name}
   [x] Routed to: {agent}
   [ ] Implementation (worktree)
   [ ] Testing (tsc, build, acceptance criteria, edge cases)
+  [ ] Intent verification vs original ask: {ALIGNED | DRIFT — awaiting user decision}
   [ ] Preview review — latest changes (iteration {n})
   [ ] Main review — all branch changes (iteration {n})
   [ ] PR created
   [ ] Post-PR review loop (iteration {n}) — comments findings on PR
   [ ] Atoll updated + PR commented
+  [ ] Registry updated
+  [ ] Closer verdict: {CLOSED | BLOCKED — n failures}
 ```
 
 For parallel runs, show all pipelines:
