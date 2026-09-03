@@ -1,0 +1,37 @@
+{
+  "$comment": "Config for the Atoll issue watcher (scripts/atoll-watch.mjs). Edit projects/statuses/window here; no secrets live in this file.",
+  "projects": [
+    {
+      "key": "tool-portal",
+      "name": "VMG Tools Platform",
+      "atollProjectId": "c54d5c8a-463f-40fe-8577-977c6e18c59a",
+      "identifierPrefix": "VTP",
+      "githubRepo": "VMG-Digital/tool-portal"
+    },
+    {
+      "key": "coal",
+      "name": "COAL: Creative Opportunity Analyzer Lab",
+      "atollProjectId": "f556340b-34cd-4984-9973-84133ef15e4a",
+      "identifierPrefix": "CCOAL",
+      "githubRepo": null
+    }
+  ],
+  "notify": {
+    "lookbackMinutes": 90,
+    "watchedStatuses": ["todo", "backlog"],
+    "$statusNote": "Only issues in these statuses trigger a ping. Empty array = any non-terminal status.",
+    "skipAssignedToSelf": true,
+    "$skipNote": "true = don't ping issues already assigned to you (already claimed). Reymond-assigned issues are still pinged unless you add exclude rules.",
+    "excludeAssigneeIds": [],
+    "maxPerTick": 10
+  },
+  "pickup": {
+    "keyword": "pickup",
+    "$keywordNote": "A Telegram reply of 'pickup VTP-1234' assigns that issue to you (self) and confirms. Case-insensitive.",
+    "approveKeyword": "approve",
+    "$approveNote": "A Telegram reply of 'approve VTP-1234' posts a human-approval comment so a parked card (waiting for human approval) resumes on the next /workflow loop cycle.",
+    "approvalMarker": "WF-APPROVED",
+    "updatesLookbackHours": 24,
+    "claimLabel": "wf-claimed"
+  }
+}
