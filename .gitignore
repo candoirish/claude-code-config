@@ -1,0 +1,5 @@
+# Local-only secrets for the automation watcher — never commit these.
+automation/.env.local
+automation/.env
+automation/logs/
+*.local.json

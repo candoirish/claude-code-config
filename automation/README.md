@@ -34,6 +34,20 @@ so the same code runs identically in the cloud and on both laptops.
 | `atoll-claimed.mjs` | **desktop** | list issues you've claimed; `--claim <ID>` to claim without Telegram |
 | `atoll-move.mjs` | **desktop** | move a card to the column for a pipeline phase (blitz's automatic moves) |
 | `next-card.mjs` | **desktop** | loop mode: next eligible card in the "ready to build" column |
+| `run-watch.ps1` | **Windows scheduled task** | loads `.env.local`, runs the watcher hourly, logs to `logs/` |
+
+## Known Atoll CLI quirks (found during live testing, already worked around in the code)
+
+- **`issue assign --to self` fails for the `blitz` key.** It's an agent-type identity
+  (`memberType: agent`), and `self` only resolves for regular member accounts — it errors
+  `"You are not a member of this organisation"`. Fixed in `lib/atoll.mjs`: `claimIssue()`
+  resolves the caller's real ID via `atoll auth status` once and assigns to that explicitly.
+- **`issue list --scope mine` omits `identifier` and `projectSlug`** (present on a normal
+  `--project` list, absent here — confirmed via raw JSON). Fixed by synthesizing
+  `"<identifierPrefix>-<number>"` in `atoll-claimed.mjs` and `next-card.mjs` wherever this
+  scope is used.
+- **The `atoll` CLI intermittently crashes on Windows** (exit 0xC0000409 / 3221226505,
+  no stderr). `lib/atoll.mjs`'s `atoll()` retries up to 3 attempts with linear backoff.
 
 ## Kanban board sync (blitz moves cards automatically)
 
@@ -110,20 +124,41 @@ ATOLL_PROFILE=blitz TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=... \
 ATOLL_PROFILE=blitz node automation/atoll-claimed.mjs
 ```
 
-## Cloud routine setup (the always-on part)
+## Local scheduled task (Windows) — what's actually running
 
-1. **Set the four env secrets** in the cloud environment on
-   <https://claude.ai/code> → Environments → (your environment) → Environment variables:
-   `ATOLL_API_KEY`, `ATOLL_ORG_ID`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`.
-2. **Create the routine** (done via the `schedule` skill / `RemoteTrigger`). It:
-   - checks out this repo,
-   - runs `node automation/atoll-watch.mjs`,
-   - reports what it sent/claimed.
-   - Schedule: hourly (cron minimum interval is 1 hour).
-3. Manage/inspect at <https://claude.ai/code/routines>.
+**The cloud routine path was tried and shelved**: the claude.ai/code environment's
+"Environment variables" UI does not get injected into scheduled-routine runs (confirmed
+live — `env | grep ATOLL_` came back empty inside the run), and writing secrets into the
+routine config directly via the API is blocked by a safety classifier (correctly — a tool
+shouldn't be the one embedding live credentials). The routine (`trig_01NpkLQ5SUxn38j7bDgMiPue`,
+name `atoll-issue-watcher`) exists but is **disabled**; revisit only if the platform adds a
+supported way to attach secrets to a routine.
 
-The routine prompt is intentionally thin — all logic lives in the committed scripts,
-so behavior is deterministic and testable locally before it ever runs in the cloud.
+Instead, the watcher runs as an **hourly Windows Scheduled Task**:
+
+1. Real secrets live in `automation/.env.local` (gitignored — copy from
+   `automation/.env.local.example` and fill in `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID`;
+   `ATOLL_PROFILE=blitz` handles Atoll auth via the existing local profile).
+2. `automation/run-watch.ps1` loads that file and runs `atoll-watch.mjs`, logging to
+   `automation/logs/watch-YYYY-MM-DD.log` (14-day retention).
+3. The task `AtollIssueWatcher` runs it every hour. Recreate it with:
+   ```powershell
+   $psExe = (Get-Command powershell).Source
+   $scriptPath = "<repo>\automation\run-watch.ps1"
+   $action = New-ScheduledTaskAction -Execute $psExe -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`""
+   $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).Date -RepetitionInterval (New-TimeSpan -Hours 1) -RepetitionDuration (New-TimeSpan -Days 3650)
+   $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopOnIdleEnd -ExecutionTimeLimit (New-TimeSpan -Minutes 10) -MultipleInstances IgnoreNew
+   Register-ScheduledTask -TaskName "AtollIssueWatcher" -Action $action -Trigger $trigger -Settings $settings -Force
+   ```
+   Check status: `Get-ScheduledTaskInfo -TaskName "AtollIssueWatcher"` (`LastTaskResult 0` = success).
+
+**Trade-off:** this only runs while the machine is on (not true always-on like a cloud
+routine would be), but it's fully proven working — see the bugs it caught below.
+
+**On macOS**, the equivalent is a `launchd` plist (`~/Library/LaunchAgents/`) with an hourly
+`StartInterval` calling the same `atoll-watch.mjs` via `node`, sourcing the same
+`.env.local` shape. `run-watch.ps1`'s logic (load env file → run → log → prune) is what
+to port; ask for the plist if/when you set up the Mac.
 
 ## Portability (Windows ↔ macOS)
 

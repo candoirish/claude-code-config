@@ -87,16 +87,21 @@ const all = args.includes("--all");
 const projById = new Map(cfg.projects.map((p) => [p.atollProjectId, p]));
 const READY = new Set(["todo", "backlog", "in_review", "planned"]);
 
+// `--scope mine` responses omit `identifier`/`projectSlug` (confirmed live) —
+// synthesize identifier as "<prefix>-<number>" from watch-config instead.
 const mine = await listMyOpenIssues();
 const rows = mine
   .filter((it) => all || READY.has(it.status))
-  .map((it) => ({
-    identifier: it.identifier,
-    project: projById.get(it.project_id)?.key || it.projectSlug || it.project_id,
-    status: it.status,
-    title: it.title,
-    url: it.url,
-    created_at: it.created_at,
-  }));
+  .map((it) => {
+    const proj = projById.get(it.project_id);
+    return {
+      identifier: it.identifier || (proj ? `${proj.identifierPrefix}-${it.number}` : `?-${it.number}`),
+      project: proj?.key || it.projectSlug || it.project_id,
+      status: it.status,
+      title: it.title,
+      url: it.url,
+      created_at: it.created_at,
+    };
+  });
 
 console.log(JSON.stringify({ count: rows.length, issues: rows }, null, 2));

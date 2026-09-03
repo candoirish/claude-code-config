@@ -78,9 +78,26 @@ export async function listOpenIssues(projectId, limit = 50) {
   return res.items || [];
 }
 
-// Assign an issue to the calling identity (the API key's own user).
+// Assign an issue to the calling identity.
+//
+// `--to self` only resolves for regular member accounts. The `blitz` API key
+// is an agent-type identity (memberType: agent), and for agents `self` fails
+// with "You are not a member of this organisation" — confirmed live against
+// VTP-2201. So resolve the actor's own ID once (via `auth status`) and assign
+// to that explicitly; this also works for a regular member key unchanged.
+let selfIdCache = null;
+async function resolveSelfId() {
+  if (selfIdCache) return selfIdCache;
+  if (process.env.ATOLL_ASSIGNEE_ID) return (selfIdCache = process.env.ATOLL_ASSIGNEE_ID);
+  const status = await atoll(["auth", "status"]);
+  const id = status?.auth?.userId || status?.auth?.agentId;
+  if (!id) throw new Error("Could not resolve caller identity from `atoll auth status`.");
+  return (selfIdCache = id);
+}
+
 export async function claimIssue(identifier) {
-  return atoll(["issue", "assign", identifier, "--to", "self"]);
+  const id = await resolveSelfId();
+  return atoll(["issue", "assign", identifier, "--to", id]);
 }
 
 // Add a label (best-effort; label must exist or the CLI will create/attach it).

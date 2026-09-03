@@ -36,8 +36,9 @@ for (const proj of watchCfg.projects) {
     continue;
   }
   for (const it of res.items || []) {
+    // `--scope mine` omits `identifier` (confirmed live) — synthesize it.
     pool.push({
-      identifier: it.identifier,
+      identifier: it.identifier || `${proj.identifierPrefix}-${it.number}`,
       project: proj.key,
       priority: it.priority ?? 3,
       status: it.status,
