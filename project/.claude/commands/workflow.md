@@ -6,6 +6,12 @@ description: "Spec-driven development pipeline. Routes work through: spec-archit
 
 Orchestrate the full spec-driven development pipeline for the VMG Tools Portal.
 
+## Main Agent Contract
+
+The session running `/workflow` is the **main agent** — the single point of contact for the user for the life of the pipeline, however many sessions that spans. Every specialist (spec-architect, agent-router, implementer, ui-specialist, tester, intent-verifier, preview-reviewer, reviewer, pr-manager, closer) is spawned via `Agent()` and reports back to the main agent only. The user never talks to a specialist directly, and never sees a raw specialist report — the main agent relays, summarizes, and asks on its behalf (this includes every pause point: Phase 4.9 drift, Phase 6.5 preview approval, Phase 7 collie permission).
+
+Because pipeline state lives in `specs/_queue.json` and `specs/_registry.md` rather than in-memory, a fresh session can pick up as the main agent for a pipeline it didn't start — see the no-argument entry mode below. Don't make the user re-explain a request that's already tracked in the queue.
+
 ## Input
 
 Four entry modes. All support an optional `@worktree` target for multi-feature work.
@@ -30,7 +36,11 @@ Four entry modes. All support an optional `@worktree` target for multi-feature w
   3. fix brand checker upload error
 ```
 
-**4. No argument** — asks what to build and which worktree to target.
+**4. No argument** — resume-or-ask:
+1. Read `specs/_queue.json`. If it has any entry not in a terminal state (`done`/`cancelled`) — including one waiting on a pause point (drift decision, preview approval, collie permission, PR merge) — reconstruct that pipeline's state from the queue entry + `specs/_registry.md` and resume as its main agent: report current status for each in-progress entry and continue from wherever it left off (re-ask a pending pause-point question if one is open, otherwise proceed to the next phase). If multiple are in progress, resume all of them and show combined status (see Progress Tracking).
+2. Only if the queue has nothing in progress, ask what to build and which worktree to target.
+
+This is what makes the main agent contract hold across sessions: the user says `/workflow` once, and the pipeline's state — not the user's memory — is what a new session resumes from.
 
 ### Worktree Targeting (`@worktree`)
 
@@ -256,7 +266,9 @@ Spawn the `spec-architect` agent with the user's request:
 Agent(spec-architect): "Create a spec for: {user's request}"
 ```
 
-Wait for the spec to be created. Present it to the user for approval.
+Wait for the spec to be created.
+
+Before presenting the spec for approval, invoke the `grilling` skill (Skill tool) on the spec to stress-test it — surface unstated assumptions, ambiguous acceptance criteria, and edge cases the spec-architect glossed over. Work through the grilling rounds with the user; once the frontier is empty (shared understanding reached), fold any resulting changes into the spec, then present the finalized spec to the user for approval.
 
 ### Phase 2: Routing (after user approves)
 
