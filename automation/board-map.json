@@ -1,0 +1,47 @@
+{
+  "$comment": "Maps /workflow pipeline moments to Atoll board columns (statuses) per project. blitz moves the card automatically at each boundary via automation/atoll-move.mjs. Statuses below are the REAL keys on each board (verified). Edit the mapping to taste; if you want exact diagram columns (e.g. a dedicated 'remediation' or 'human_testing' column) I can create them with `atoll board-column create` on approval.",
+
+  "phases": {
+    "$order": ["idea", "ready", "in_progress", "remediation", "testing", "human_gate", "waiting", "done", "cancelled"],
+    "idea": "New/unplanned issue (IDEA / inbox).",
+    "ready": "Claimed and planned — queued to build (READY TO BUILD).",
+    "in_progress": "Implementation running (IN PROGRESS).",
+    "remediation": "A review/test/preview check failed; fixing (REMEDIATION).",
+    "testing": "Automated testing + QA evidence running (PRODUCTION/QA TESTING).",
+    "human_gate": "Waiting for human approval — preview verification or collie-review permission. In loop mode the card parks here and the loop continues; reply 'approve <ID>' to resume.",
+    "waiting": "Blocked / on hold.",
+    "done": "Merged and deployed (DONE).",
+    "cancelled": "Dropped."
+  },
+
+  "projects": {
+    "tool-portal": {
+      "columnOrder": ["backlog", "todo", "in_progress", "testing", "done", "cancelled"],
+      "map": {
+        "idea": "backlog",
+        "ready": "todo",
+        "in_progress": "in_progress",
+        "remediation": "in_progress",
+        "testing": "testing",
+        "human_gate": "testing",
+        "waiting": "backlog",
+        "done": "done",
+        "cancelled": "cancelled"
+      }
+    },
+    "coal": {
+      "columnOrder": ["backlog", "todo", "in_progress", "qa", "decision_gate", "waiting_on_hold", "done", "cancelled"],
+      "map": {
+        "idea": "backlog",
+        "ready": "todo",
+        "in_progress": "in_progress",
+        "remediation": "in_progress",
+        "testing": "qa",
+        "human_gate": "decision_gate",
+        "waiting": "waiting_on_hold",
+        "done": "done",
+        "cancelled": "cancelled"
+      }
+    }
+  }
+}

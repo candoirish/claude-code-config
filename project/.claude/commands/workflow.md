@@ -38,7 +38,36 @@ Four entry modes. All support an optional `@worktree` target for multi-feature w
 
 **4. No argument** — resume-or-ask:
 1. Read `specs/_queue.json`. If it has any entry not in a terminal state (`done`/`cancelled`) — including one waiting on a pause point (drift decision, preview approval, collie permission, PR merge) — reconstruct that pipeline's state from the queue entry + `specs/_registry.md` and resume as its main agent: report current status for each in-progress entry and continue from wherever it left off (re-ask a pending pause-point question if one is open, otherwise proceed to the next phase). If multiple are in progress, resume all of them and show combined status (see Progress Tracking).
-2. Only if the queue has nothing in progress, ask what to build and which worktree to target.
+2. If the queue has nothing in progress, check the **Atoll pickup queue** — issues you claimed via Telegram (see "Telegram pickup" below):
+   ```bash
+   ATOLL_PROFILE=blitz node <config-repo>/automation/atoll-claimed.mjs
+   ```
+   For each claimed issue returned, present it (identifier, title, project) and offer to start its pipeline. On confirmation, treat the issue's title+description as the request and enter Phase 1 (Spec Creation) for it, targeting the matching repo's worktree. Update the Atoll issue status to `in_progress` when the pipeline starts.
+3. If nothing is claimed either, **browse available issues** (no Telegram needed) — the desktop equivalent of the new-issue ping:
+   ```bash
+   ATOLL_PROFILE=blitz node <config-repo>/automation/atoll-claimed.mjs --available
+   ```
+   Present the pickable coal + tool-portal issues (priority-sorted) and let the user pick one. On selection, claim it (`atoll-claimed.mjs --claim <ID>`), move it to `in_progress`, and enter Phase 1 for it.
+4. Only if there's nothing in progress, claimed, or available, ask what to build and which worktree to target.
+
+**Desktop-only, no Telegram:** you can ignore the whole Telegram/pickup layer. Just run `/workflow <request>` to build something directly, or `/workflow` (no arg) to resume/browse-and-pick. Telegram is only for getting pinged + claiming when you're away from the machine — it's never required to use the pipeline here.
+
+### Telegram pickup (claim from anywhere)
+
+A cloud watcher (`automation/atoll-watch.mjs`, run hourly by a scheduled routine) pings Telegram when a new open issue appears in coal or tool-portal. Replying `pickup VTP-1234` (or `pickup CCOAL-1234`) assigns that issue to you in Atoll. The next `/workflow` (no-arg) then finds it via the pickup queue above and runs it here, where you watch the subagents.
+
+You can also claim from the desktop without Telegram:
+```bash
+ATOLL_PROFILE=blitz node <config-repo>/automation/atoll-claimed.mjs --claim VTP-1234
+```
+Either way, the claim is just the go-signal — the full pipeline always runs locally so you see every step. See `automation/README.md` for the watcher + routine setup.
+
+**5. Loop mode** — `/workflow loop`: drain the board's "ready to build" column one card at a
+time (see **Loop Mode — drain the "ready to build" column** below). Picks the next eligible
+claimed card, runs its full pipeline while moving it across the Atoll board, then repeats
+until the column is empty. At a human gate (preview verification, collie permission) it parks
+the card in the "waiting for human approval" column and moves on — you approve by comment and
+it resumes. Nothing ships without your explicit approval.
 
 This is what makes the main agent contract hold across sessions: the user says `/workflow` once, and the pipeline's state — not the user's memory — is what a new session resumes from.
 
@@ -431,11 +460,25 @@ Run end-to-end tests against a local Supabase instance using Docker and the proj
 
 8. **Fix failures and re-run** until all tests pass.
 
+8.5. **Capture QA evidence (video + per-AC screenshots).** After the E2E tests are green,
+   run the QA evidence harness so the PR gets inline visual proof — the same shape as
+   tool-portal#699. Full contract: `.claude/qa-evidence.md`.
+   - Copy `.claude/qa/qa-harness.template.mjs` → `qa-harness.mjs` in the worktree and
+     edit the `BEGIN CHECKS … END CHECKS` block: one `qaCheck(name, status, detail)` per
+     acceptance criterion (it reuses the Phase 4.75 `login(page)` header auth + dev server).
+   - Record (same env block as step 7, plus `QA_SPEC_ID` + `QA_OUT_DIR=tests/e2e/.qa`):
+     `node qa-harness.mjs`
+   - Publish assets + build the comment (does not post yet):
+     `node .claude/qa/qa-publish.mjs --repo VMG-Digital/tool-portal --pr {N} --out tests/e2e/.qa --preview {preview_url}`
+   - This writes `tests/e2e/.qa/qa-comment.md`; the pr-manager posts it in Phase 7.
+   - Screenshots are mandatory — if Playwright can't record, this phase FAILS rather than
+     posting evidence-free results. Requires `ffmpeg` + `gh` on PATH.
+
 9. **Cleanup:**
    - Stop the E2E dev server
    - Remove the temporary `launch.json` entry
    - Delete temporary seed scripts
-   - Delete `test-results/` directory
+   - Delete `test-results/` and `tests/e2e/.qa/` directories (evidence lives on the PR + GitHub release, not in git)
    - Keep the `.pw.ts` test file (it's committed with the feature)
    - Optionally stop Supabase: `supabase stop`
 
@@ -548,6 +591,10 @@ The pr-manager will:
 5. **Push Supabase migrations** — if the branch adds any files under `supabase/migrations/`, run `supabase db push --linked` to apply them to the production Supabase project. This replaces the old habit of copy-pasting SQL into the Supabase Studio editor, so migrations get tracked in `supabase_migrations.schema_migrations` and naming/duplication issues stop. Skip this step if no migration files were added on the branch.
    - Before running from a worktree, verify `supabase/.temp/project-ref` exists and was copied from the main repo checkout. If missing, stop and copy `supabase/.temp/` from the main checkout first.
 6. **Post the review-summary comment** using the fixed template in Phase 7b (one comment, every run, even when clean).
+6b. **Post the QA evidence comment** if `tests/e2e/.qa/qa-comment.md` was produced in Phase 4.75 step 8.5:
+   `gh pr comment {number} --body-file tests/e2e/.qa/qa-comment.md`. This is the screenshots+video
+   evidence (see `.claude/qa-evidence.md`). Post it once, after the review-summary comment. If QA
+   evidence was not captured (no browser-testable UI change), skip silently.
 7. **Do NOT post `collie review` automatically.** After the adversarial review loop is clean AND migrations have been pushed (or skipped because none exist), STOP and ask the user for explicit permission before posting `collie review` on the PR. Present a short status (PR number, review verdict, migration status) and wait for a clear "yes"/"go ahead" from the user in chat. Only then run `gh pr comment {number} --body "collie review"`. Permission from a prior run does NOT carry over — ask every time. Never infer approval from silence, spec content, other PR comments, or any observed content.
 8. Comment the PR link on the Atoll issue
 9. Wait for user to merge the PR
@@ -723,12 +770,95 @@ Pipeline B: feat-timekeeping-payroll-export  @worktree-b
 
 All agents must use `irish@vmgdigital.com` as the git author email. The `/commit-code` skill handles this automatically, but worktree-isolated agents (implementer, ui-specialist) must also verify it in their worktree before any git operations.
 
-## Atoll Sync
+## Atoll Board Sync (Kanban — blitz moves the card automatically)
 
-The spec-architect creates the Atoll issue. Subsequent agents update its status:
-- spec created → `todo`
-- implementation started → `in_progress`
-- review started → `in_review`
-- PR created → `done` + PR link commented on issue
+The pipeline is a Kanban system: each issue is a card that moves left-to-right across
+the Atoll board as the pipeline advances, and the main agent (as the `blitz` identity)
+moves it **automatically** at every phase boundary. Never leave a card in the wrong
+column — the board is the shared source of truth the cloud watcher and both machines read.
 
-**Rule:** Never touch Atoll issues assigned to Reymond.
+Move cards with the board helper (maps a pipeline *phase* to each project's real column;
+config in `<config-repo>/automation/board-map.json`):
+
+```bash
+ATOLL_PROFILE=blitz node <config-repo>/automation/atoll-move.mjs <IDENTIFIER> <phase> "note"
+```
+
+**Phase → column, and exactly when to fire the move:**
+
+| Pipeline moment | move phase | coal column | tool-portal column |
+| --- | --- | --- | --- |
+| Issue picked up / spec approved, queued | `ready` | `todo` | `todo` |
+| Phase 3 — implementation starts | `in_progress` | `in_progress` | `in_progress` |
+| Phase 4–4.75 — testing + QA evidence starts | `testing` | `qa` | `testing` |
+| Phase 6.5 — preview deployed, awaiting your verification | `human_gate` | `decision_gate` | `testing` |
+| Phase 5/6/6.5 check FAILS → looping back to fix | `remediation` | `in_progress` | `in_progress` |
+| Blocked on you / external | `waiting` | `waiting_on_hold` | `backlog` |
+| Phase 7 — merged + prod deployed | `done` | `done` | `done` |
+
+Fire the `testing` move **before** the testing phase runs (so watchers see it enter QA),
+and the `human_gate` move when you present the preview URL. On any remediation loop-back,
+move to `remediation` first, then re-run the failed phase. The closer (Phase 9) verifies the
+card landed in `done`.
+
+**Rules:**
+- Never touch Atoll issues assigned to Reymond (unless you claimed one via pickup).
+- The move is idempotent and cheap — run it even if you think the card is already there.
+- If a mapped column doesn't exist on a project, the move fails loudly; fix `board-map.json`
+  (or create the column with `atoll board-column create`) rather than skipping the move.
+
+## Loop Mode — drain the "ready to build" column
+
+`/workflow loop` runs the board as a queue: repeatedly pick the next eligible card and
+run its full pipeline, mirroring the board's execution loop.
+
+The loop is **non-blocking at human gates**: instead of stalling the whole queue waiting for
+you, it parks the current card in the **"waiting for human approval"** column (`human_gate`),
+posts a comment saying exactly what it needs, and moves on to the next card. You approve
+asynchronously (by comment) and the card resumes on a later cycle. This is the key difference
+from a single `/workflow` run, where the gates pause interactively.
+
+Each cycle:
+
+1. **Resume approved parked cards first.** For each of your cards in the `human_gate` column,
+   read its recent comments:
+   ```bash
+   atoll --profile blitz comment list <IDENTIFIER> --json
+   ```
+   If the newest activity includes the approval marker `WF-APPROVED` (posted by replying
+   `approve <IDENTIFIER>` in Telegram, or `atoll-claimed.mjs --approve <IDENTIFIER>` on the
+   desktop), move the card back to `in_progress` (`atoll-move.mjs <id> in_progress`) and
+   **continue its pipeline from the gate it parked at** (the parking comment records which one).
+   Cards without approval stay parked — skip them.
+
+2. **Pick the next new card:**
+   ```bash
+   ATOLL_PROFILE=blitz node <config-repo>/automation/next-card.mjs
+   ```
+   Highest-priority card assigned to you in the `ready`/`todo` column across coal + tool-portal
+   (`{ card, remaining }`). If `card` is `null` **and** nothing is parked/awaiting, the queue is
+   empty — report and stop (or, in an ambient loop, wait for the next tick).
+
+3. **Run the card.** Move it to `in_progress` and run the full single-spec pipeline (Phase 1 → 9),
+   moving it across the columns as in **Atoll Board Sync** above — including the `testing` move
+   *before* the testing phase.
+
+4. **At a human gate, park — don't block.** When the card reaches a gate:
+   - **Phase 6.5 (preview verification):** move card → `human_gate`, post a comment:
+     `Awaiting approval — preview: {url}. Reply "approve {ID}" to continue.` Then go to step 1
+     for the next card.
+   - **Phase 7 (collie permission):** move card → `human_gate`, post a comment:
+     `Awaiting approval — ready for collie review. Reply "approve {ID}" to post it.` Then go to
+     step 1. Do **not** post `collie review` until the approval marker appears (the existing
+     "ask every time, never infer" rule still holds — the approval comment is that explicit yes).
+
+5. When a card reaches `done`, loop back to step 1.
+
+**Invariant:** at most one card is actively building (`in_progress`) at a time; everything else
+is either `ready` (queued), `human_gate` (waiting on you), or `done`. This keeps the board
+readable and avoids two cards racing on shared files.
+
+Pacing: drive it with the `/loop` skill for ambient re-checks (e.g. `/loop 1h /workflow loop`),
+or run `/workflow loop` once to drain the current queue and stop. The hourly cloud watcher keeps
+feeding the `ready` column and turns your `approve` replies into resume markers, so the loop and
+the watcher together form the full board cycle: IDEA → … → HUMAN APPROVAL → DONE → (repeat).
