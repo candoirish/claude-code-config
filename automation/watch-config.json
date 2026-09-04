@@ -1,19 +1,28 @@
 {
   "$comment": "Config for the Atoll issue watcher (scripts/atoll-watch.mjs). Edit projects/statuses/window here; no secrets live in this file.",
+  "$localRepoPathNote": "localRepoPath is the MAIN repo checkout for this project on THIS machine (not a worktree) — /workflow's auto-launch cd's here first, then creates a new branch+worktree per spec. Update this on each machine (Windows path here; use the macOS clone path on the Mac).",
   "projects": [
     {
       "key": "tool-portal",
       "name": "VMG Tools Platform",
       "atollProjectId": "c54d5c8a-463f-40fe-8577-977c6e18c59a",
       "identifierPrefix": "VTP",
-      "githubRepo": "VMG-Digital/tool-portal"
+      "githubRepo": "VMG-Digital/tool-portal",
+      "localRepoPath": "C:\\Users\\CSWPC26\\Documents\\GitHub\\tool-portal",
+      "baseBranch": "main",
+      "supportsPickupEntry": true,
+      "$supportsPickupEntryNote": "true = this repo's own .claude/commands/workflow.md has the 'pickup <ID>' entry mode (added for this automation) — auto-launch uses it directly. false = fall back to a plain direct-request prompt built from the issue title, since coal's /workflow is a separate, older copy we don't modify."
     },
     {
       "key": "coal",
       "name": "COAL: Creative Opportunity Analyzer Lab",
       "atollProjectId": "f556340b-34cd-4984-9973-84133ef15e4a",
       "identifierPrefix": "CCOAL",
-      "githubRepo": null
+      "githubRepo": "VMG-Digital/coal",
+      "localRepoPath": "C:\\Users\\CSWPC26\\Documents\\GitHub\\coal",
+      "baseBranch": "staging",
+      "$baseBranchNote": "coal branches/worktrees are cut from staging, NOT main (GitHub default is main, but staging is the working base) — every new worktree must start from staging, and PRs target staging.",
+      "supportsPickupEntry": false
     }
   ],
   "notify": {
@@ -33,5 +42,9 @@
     "approvalMarker": "WF-APPROVED",
     "updatesLookbackHours": 24,
     "claimLabel": "wf-claimed"
+  },
+  "autoLaunch": {
+    "enabled": true,
+    "$note": "On a successful pickup claim: silently checkout+pull the project's baseBranch in its localRepoPath (coal vs tool-portal, resolved by identifier prefix), then open a NEW Claude Code DESKTOP conversation there via claude://code/new?folder=<path> (confirmed live). That deep link has no message param, so the starting prompt is placed on the clipboard — paste + Enter to begin. Windows-only today; set enabled:false to fall back to notify-only (Telegram just says 'claimed, open Claude Code yourself')."
   }
 }

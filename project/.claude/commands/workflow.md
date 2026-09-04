@@ -69,16 +69,47 @@ until the column is empty. At a human gate (preview verification, collie permiss
 the card in the "waiting for human approval" column and moves on — you approve by comment and
 it resumes. Nothing ships without your explicit approval.
 
+**6. Direct pickup** — `/workflow pickup <IDENTIFIER>` (e.g. `/workflow pickup VTP-2201`):
+skip the browse/resume logic and go straight to building one specific Atoll issue. This is
+what the local watcher's auto-launch uses — when a Telegram `pickup <ID>` reply successfully
+claims an issue, it opens a new Claude Code window running exactly this command, so the
+pipeline starts immediately with no extra confirmation step. Steps:
+1. Fetch the issue: `atoll --profile blitz issue view <IDENTIFIER> --json`. If it doesn't
+   exist or isn't assigned to you, say so and stop.
+2. Move it to `in_progress` (`atoll-move.mjs <id> in_progress "Pipeline started"`).
+3. Treat its title + description as the request and enter Phase 1 (Spec Creation). Create a
+   new branch + worktree for it per **Worktree Targeting** above, slugged from the identifier
+   and title (e.g. `../tool-portal-vtp-2201 -b feat/vtp-2201-leave-summary`) — never run in
+   the main checkout.
+4. Continue the normal pipeline from there — all the usual phases and gates apply
+   (including Phase 1's spec approval step; auto-launch does not skip human review of
+   the spec, only the "which issue do I work on" browse step).
+
 This is what makes the main agent contract hold across sessions: the user says `/workflow` once, and the pipeline's state — not the user's memory — is what a new session resumes from.
 
 ### Worktree Targeting (`@worktree`)
 
-When `@worktree` is provided, the pipeline runs in that worktree instead of the current directory.
+**Every spec gets its own new branch and new worktree — never the main checkout, and never
+an implicit reuse of "whatever's currently checked out."** This isolates each spec's changes
+so parallel/looped pipelines can never collide on the same working tree, and so the main repo
+checkout always stays clean and on `main`. This applies to every entry mode, including direct
+requests, no-arg resume/pickup, loop mode, and `/workflow pickup <ID>`.
 
-The `@worktree` value can be:
+Default (no `@worktree` given): derive a slug from the request/issue (e.g.
+`fix-shift-label-formatting`, or `vtp-2201` from an Atoll identifier when no better slug is
+obvious) and a type prefix from the nature of the work (`fix/`, `feat/`, `chore/`), then create:
+```bash
+git worktree add ../tool-portal-{slug} -b {type}/{slug}
+```
+Run the entire pipeline for that spec inside the new worktree.
+
+`@worktree` overrides the default only to **target an already-existing** worktree instead of
+creating a fresh one — use it for genuine continuation of multi-step work on the same branch
+(e.g. a follow-up spec that must land on a branch already in review), not as a way to skip
+worktree creation. The `@worktree` value can be:
 - **An existing worktree name:** `@timekeeping-multiteam` → resolves to the worktree path for that branch/directory
-- **A branch name:** `@feature/new-dashboard` → finds or creates a worktree for that branch
-- **A new feature slug:** `@new-reporting-tool` → creates a new worktree + branch
+- **A branch name:** `@feature/new-dashboard` → finds the worktree for that branch, or creates one if it doesn't exist yet
+- **A new feature slug:** `@new-reporting-tool` → creates a new worktree + branch (same as the default, just with an explicit name)
 
 To find existing worktrees:
 ```bash
@@ -110,9 +141,7 @@ test -f supabase/.temp/project-ref
 
 If either is missing, stop and copy it from the main repo checkout. Never deploy or push Supabase migrations from an unlinked worktree.
 
-All agents in the pipeline operate within the targeted worktree. The `specs/_queue.json` in the main repo tracks which worktree each spec is running in.
-
-When no `@worktree` is specified, the pipeline runs in the current working directory.
+All agents in the pipeline operate within the targeted worktree — never in the main repo checkout. The `specs/_queue.json` in the main repo tracks which worktree each spec is running in.
 
 When a PRD is provided, spawn `prd-reader` first to decompose it into atomic specs, then run the pipeline for each spec in dependency order.
 

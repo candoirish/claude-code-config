@@ -43,6 +43,33 @@ const projectByPrefix = new Map(cfg.projects.map((p) => [p.identifierPrefix.toUp
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const cleanTitle = (t) => t.replace(/^\[[^\]]*\]\s*/g, "").replace(/\[[^\]]*\]\s*/g, "").trim();
 
+// This process doesn't reliably get desktop/window access when spawning GUI apps
+// via child_process (confirmed live), so it never launches anything itself — it
+// only emits a machine-readable LAUNCH_JSON line. run-watch.ps1 (native
+// PowerShell, which does have desktop access) parses it and:
+//   1. silently checks out + pulls `base` in the main checkout at `path`
+//   2. opens a NEW Claude Code DESKTOP conversation there via the
+//      claude://code/new?folder=<path> deep link (confirmed live — this is the
+//      same action as the app's own "New Claude Code Session"), with `prompt`
+//      placed on the clipboard, since that deep link has no message parameter
+//      (verified against the app's own bundled source).
+//
+// Prompt depends on whether this project's own /workflow has the `pickup <ID>` entry
+// mode: tool-portal's does (added alongside this automation); coal's is a separate,
+// older copy we deliberately don't modify — for coal, fall back to a plain
+// direct-request prompt built from the issue title, which its /workflow already supports.
+function describeLaunch(id, proj, issueTitle) {
+  if (!proj.localRepoPath) {
+    console.log(`[launch] ${proj.key}: no localRepoPath configured — skipping auto-launch for ${id}`);
+    return null;
+  }
+  const base = proj.baseBranch || "main";
+  const prompt = proj.supportsPickupEntry
+    ? `/workflow pickup ${id}`
+    : `/workflow ${cleanTitle(issueTitle || id)} (Atoll ${id})`;
+  return { id, project: proj.key, path: proj.localRepoPath, base, prompt };
+}
+
 // ---------- Job 1: NOTIFY ----------
 async function notify() {
   const { lookbackMinutes, watchedStatuses, skipAssignedToSelf, excludeAssigneeIds, maxPerTick } =
@@ -125,18 +152,28 @@ async function pickup() {
   }
 
   for (const id of claims) {
-    if (!projectByPrefix.has(id.split("-")[0])) {
+    const proj = projectByPrefix.get(id.split("-")[0]);
+    if (!proj) {
       console.log(`[pickup] ${id}: unknown prefix, skipping`);
       continue;
     }
     console.log(`[pickup] claiming ${id}`);
     if (DRY) continue;
     try {
-      await claimIssue(id);
+      const assignResult = await claimIssue(id);
+      const issueTitle = assignResult?.issue?.title;
       await addLabel(id, cfg.pickup.claimLabel);
       await comment(id, "Claimed for /workflow via Telegram pickup.");
+
+      const launch = cfg.autoLaunch?.enabled ? describeLaunch(id, proj, issueTitle) : null;
+      if (launch) {
+        // run-watch.ps1 greps stdout for this exact prefix and does the actual launch.
+        console.log(`LAUNCH_JSON ${JSON.stringify(launch)}`);
+      }
       await tg.sendMessage(
-        `✅ <code>${esc(id)}</code> claimed. Open Claude Code and run <code>/workflow</code> to start it.`
+        launch
+          ? `✅ <code>${esc(id)}</code> claimed — opening Claude Code Desktop for it now. The starting prompt is on your clipboard — paste (Ctrl+V) and press Enter to begin.`
+          : `✅ <code>${esc(id)}</code> claimed. Open Claude Code and run <code>/workflow</code> to start it.`
       );
     } catch (e) {
       console.error(`[pickup] ${id} failed: ${e.message}`);

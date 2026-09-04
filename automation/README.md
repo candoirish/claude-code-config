@@ -124,6 +124,26 @@ ATOLL_PROFILE=blitz TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=... \
 ATOLL_PROFILE=blitz node automation/atoll-claimed.mjs
 ```
 
+## Desktop auto-launch (Windows)
+
+On a successful `pickup`/`approve`, `run-watch.ps1` silently checks out + pulls the project's
+base branch, then opens a **new Claude Code Desktop conversation** rooted at that repo via the
+`claude://code/new?folder=<path>` deep link (confirmed against the app's own bundled source —
+this is the same action as the app's "New Claude Code Session"). That deep link has no
+message parameter, so the starting prompt (`/workflow pickup <ID>`) is placed on the
+clipboard — paste (Ctrl+V) and press Enter to begin.
+
+**One-time trust step:** Claude Code prompts to trust a folder the first time a session opens
+there. Since the deep link and the CLI can key the same path differently (`C:\...\coal` vs
+`C:/.../coal`), both variants need trusting once each for tool-portal and coal — already done
+for this machine. To repeat on a new machine (or after a path change), trust each repo's main
+checkout by opening a Desktop session there once via the app UI (or the deep link), accepting
+the trust dialog, and doing so once more via the CLI (`claude` in that directory) — this covers
+both path-key variants Claude Code stores in `~/.claude.json` → `projects`. New worktrees
+`/workflow` creates under a trusted repo do **not** need separate trust — trust dialogs are
+about session root directories, and worktree files are touched by the already-trusted parent
+session's own Bash/Edit tools, not by opening a fresh session rooted in the worktree.
+
 ## Local scheduled task (Windows) — what's actually running
 
 **The cloud routine path was tried and shelved**: the claude.ai/code environment's
