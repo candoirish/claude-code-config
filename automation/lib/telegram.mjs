@@ -29,11 +29,28 @@ export function sendMessage(text, { chatId = CHAT_ID, parseMode = "HTML", ...opt
   });
 }
 
-// Pull recent updates. Telegram retains ~24h of updates when no offset is confirmed,
-// which is exactly what we want: the watcher is stateless and re-reads the window
-// each tick, acting idempotently.
-export async function getUpdates({ limit = 100 } = {}) {
-  return api("getUpdates", { limit, allowed_updates: ["message"] });
+// Pull pending updates. Telegram replays the same updates on every call until
+// they're acknowledged via `offset` — see acknowledgeUpdates below. Without
+// acknowledging, a message like "pickup VTP-1234" gets re-matched and
+// re-processed on every single poll (confirmed live: this caused the watcher
+// to re-claim and re-launch a new window for the same issue every tick once
+// polling was tightened to 1 minute).
+export async function getUpdates({ limit = 100, offset } = {}) {
+  const body = { limit, allowed_updates: ["message"] };
+  if (offset !== undefined) body.offset = offset;
+  return api("getUpdates", body);
+}
+
+// Permanently clear `updates` from Telegram's pending queue so they never come
+// back from getUpdates again — no local state needed, Telegram remembers the
+// offset server-side per bot. Call this once per tick, right after fetching,
+// before acting on the messages: claim/approve are themselves idempotent at
+// the Atoll level, so an ack-then-crash is far safer than the alternative
+// (an unacknowledged message reprocessing forever).
+export async function acknowledgeUpdates(updates) {
+  if (!updates.length) return;
+  const maxId = Math.max(...updates.map((u) => u.update_id));
+  await getUpdates({ limit: 1, offset: maxId + 1 }).catch(() => {});
 }
 
 // Extract text messages from this chat within the last `hours`.

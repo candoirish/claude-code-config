@@ -131,6 +131,10 @@ async function pickup() {
     console.error(`[pickup] getUpdates failed: ${e.message}`);
     return;
   }
+  // Acknowledge immediately after fetching, before acting — otherwise every
+  // tick re-matches and re-processes the same "pickup <ID>" message forever
+  // (confirmed live). Skipped in --dry-run, which must stay read-only.
+  if (!DRY) await tg.acknowledgeUpdates(updates);
   const msgs = tg.recentTextMessages(updates, cfg.pickup.updatesLookbackHours);
   const pkw = cfg.pickup.keyword.toLowerCase();
   const akw = (cfg.pickup.approveKeyword || "approve").toLowerCase();
