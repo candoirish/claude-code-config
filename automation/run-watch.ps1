@@ -1,7 +1,7 @@
 # Hourly runner for the Atoll issue watcher, invoked by the "AtollIssueWatcher"
 # Windows Scheduled Task. Loads local-only secrets from automation/.env.local
 # (gitignored — never commit), runs automation/atoll-watch.mjs, logs output, and
-# opens a new Claude Code window for each successful pickup claim.
+# opens a new Claude Code terminal window for each successful pickup claim.
 #
 # Manual test:  powershell -File automation/run-watch.ps1
 # Task setup:   automation/README.md -> "Local scheduled task (Windows)"
@@ -41,17 +41,23 @@ Log "exit code: $exitCode"
 
 # atoll-watch.mjs itself never spawns anything — Node child_process spawning does
 # not reliably get desktop/window access from this script's execution context.
-# The launch happens HERE, in two steps:
-#   1. Silently check out + pull the project's base branch in its main checkout
-#      (hidden, synchronous) so whatever new worktree /workflow creates next
-#      branches off the correct base — invisible prep, not a visible terminal.
-#   2. Open a NEW Claude Code DESKTOP conversation rooted at that folder via the
-#      claude://code/new?folder=<path> deep link (confirmed live — this is what
-#      opens when you double-click a .claude-code-project or use the app's own
-#      "New Claude Code Session" action). The deep link has no prompt/message
-#      parameter (verified against the app's own source), so the intended first
-#      message is put on the clipboard instead — paste (Ctrl+V) and press Enter
-#      to start. This opens a Desktop conversation, not a terminal window.
+# Opening the window happens HERE instead, via Start-Process, which is the
+# mechanism verified live to produce a real visible console.
+#
+# This is a fully automated, hands-free launch (no paste, no click): the
+# starting prompt is passed directly as a CLI argument to a brand-new `claude`
+# process, so there is no ambiguity about which window/tab receives it — unlike
+# opening a Claude Code DESKTOP conversation, which shares one window across
+# tabs and has no way to target a specific tab or accept an initial message via
+# its claude://code/new deep link (confirmed against the app's own source: that
+# link only takes a `folder` parameter). A terminal window is the only launch
+# target that can be driven with zero risk of hitting the wrong session.
+#
+# The launch sequence (cd, git checkout, git pull, claude) is written to a temp
+# .bat file rather than passed as a single -ArgumentList string with embedded
+# && and nested quotes — that combination silently truncates after the first
+# token (confirmed live: only the `cd` ran, the rest of the chain never fired).
+# A .bat file sidesteps the nested-quoting problem entirely.
 foreach ($line in $output) {
     if ($line -notmatch '^LAUNCH_JSON (.+)$') { continue }
     try {
@@ -60,32 +66,29 @@ foreach ($line in $output) {
         Log "WARN: could not parse LAUNCH_JSON line: $line"
         continue
     }
-
-    Log "prepping repo for $($info.id): checkout $($info.base) + pull in $($info.path)"
+    $safePrompt = $info.prompt -replace '"', ''
+    $batContent = @"
+@echo off
+cd /d "$($info.path)"
+git checkout $($info.base)
+git pull origin $($info.base)
+claude "$safePrompt"
+"@
+    $batPath = Join-Path $env:TEMP ("atoll-launch-{0}-{1}.bat" -f $info.id, (Get-Date -Format "HHmmss"))
+    Set-Content -Path $batPath -Value $batContent -Encoding ASCII
+    Log "launching window for $($info.id) in $($info.path) (base: $($info.base)) via $batPath"
     try {
-        $prepArgs = "-NoProfile -Command `"Set-Location '$($info.path)'; git checkout $($info.base); git pull origin $($info.base)`""
-        Start-Process powershell.exe -ArgumentList $prepArgs -WindowStyle Hidden -Wait
-    } catch {
-        Log "WARN: repo prep failed for $($info.id): $($_.Exception.Message)"
-    }
-
-    try {
-        Set-Clipboard -Value $info.prompt
-        Log "clipboard set to: $($info.prompt)"
-    } catch {
-        Log "WARN: could not set clipboard for $($info.id): $($_.Exception.Message)"
-    }
-
-    $folderEncoded = [uri]::EscapeDataString($info.path)
-    $deepLink = "claude://code/new?folder=$folderEncoded"
-    Log "opening Claude Code Desktop for $($info.id): $deepLink"
-    try {
-        Start-Process $deepLink
+        Start-Process cmd.exe -ArgumentList '/k', "`"$batPath`""
         Log "launch succeeded for $($info.id)"
     } catch {
         Log "ERROR: launch failed for $($info.id): $($_.Exception.Message)"
     }
 }
+
+# Prune old launch batch files (>1 day).
+Get-ChildItem $env:TEMP -Filter "atoll-launch-*.bat" -ErrorAction SilentlyContinue |
+    Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-1) } |
+    Remove-Item -Force -ErrorAction SilentlyContinue
 
 # Keep only the last 14 days of logs.
 Get-ChildItem $logDir -Filter "watch-*.log" |

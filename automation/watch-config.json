@@ -45,6 +45,6 @@
   },
   "autoLaunch": {
     "enabled": true,
-    "$note": "On a successful pickup claim: silently checkout+pull the project's baseBranch in its localRepoPath (coal vs tool-portal, resolved by identifier prefix), then open a NEW Claude Code DESKTOP conversation there via claude://code/new?folder=<path> (confirmed live). That deep link has no message param, so the starting prompt is placed on the clipboard — paste + Enter to begin. Windows-only today; set enabled:false to fall back to notify-only (Telegram just says 'claimed, open Claude Code yourself')."
+    "$note": "On a successful pickup claim: silently checkout+pull the project's baseBranch in its localRepoPath (coal vs tool-portal, resolved by identifier prefix), then open a NEW TERMINAL window running `claude \"<prompt>\"` directly (fully hands-free — the prompt is a real CLI argument, not a paste). Deliberately NOT the Desktop app: it shares one window across tabs with no way to target a specific tab, and its claude://code/new deep link has no message parameter (verified against the app's own source) — tried and confirmed unreliable live (keystroke injection can land in the wrong already-open tab). Windows-only today; set enabled:false to fall back to notify-only (Telegram just says 'claimed, open Claude Code yourself')."
   }
 }

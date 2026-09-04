@@ -124,25 +124,31 @@ ATOLL_PROFILE=blitz TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=... \
 ATOLL_PROFILE=blitz node automation/atoll-claimed.mjs
 ```
 
-## Desktop auto-launch (Windows)
+## Auto-launch (Windows)
 
 On a successful `pickup`/`approve`, `run-watch.ps1` silently checks out + pulls the project's
-base branch, then opens a **new Claude Code Desktop conversation** rooted at that repo via the
-`claude://code/new?folder=<path>` deep link (confirmed against the app's own bundled source —
-this is the same action as the app's "New Claude Code Session"). That deep link has no
-message parameter, so the starting prompt (`/workflow pickup <ID>`) is placed on the
-clipboard — paste (Ctrl+V) and press Enter to begin.
+base branch, then opens a **new terminal window** running `claude "<prompt>"` directly — fully
+hands-free, no paste, no click. The prompt (`/workflow pickup <ID>`) is passed as a real CLI
+argument to a brand-new process.
+
+**Why a terminal and not the Desktop app.** This was tried live: the Desktop app can be opened
+at a given folder via its `claude://code/new?folder=<path>` deep link (confirmed against the
+app's own bundled source), but that link has no message parameter, and the app shares a single
+window across every open conversation/tab with no way to target a specific tab from outside.
+Driving it hands-free would mean guessing which tab is active and injecting Ctrl+V/Enter via
+OS-level keystrokes — tested live, and it landed in the wrong already-open tab because a stray
+window from an earlier run was in front. A terminal has none of that ambiguity: the prompt goes
+straight to the one process that owns it.
 
 **One-time trust step:** Claude Code prompts to trust a folder the first time a session opens
-there. Since the deep link and the CLI can key the same path differently (`C:\...\coal` vs
-`C:/.../coal`), both variants need trusting once each for tool-portal and coal — already done
-for this machine. To repeat on a new machine (or after a path change), trust each repo's main
-checkout by opening a Desktop session there once via the app UI (or the deep link), accepting
-the trust dialog, and doing so once more via the CLI (`claude` in that directory) — this covers
-both path-key variants Claude Code stores in `~/.claude.json` → `projects`. New worktrees
-`/workflow` creates under a trusted repo do **not** need separate trust — trust dialogs are
-about session root directories, and worktree files are touched by the already-trusted parent
-session's own Bash/Edit tools, not by opening a fresh session rooted in the worktree.
+there. Since a session can key the same path two ways (`C:\...\coal` vs `C:/.../coal`), both
+variants need trusting once each for tool-portal and coal — already done for this machine. To
+repeat on a new machine (or after a path change), run `claude` in each repo's main checkout once
+and accept the trust dialog — this covers the path-key variant Claude Code stores in
+`~/.claude.json` → `projects`. New worktrees `/workflow` creates under a trusted repo do **not**
+need separate trust — trust dialogs are about session root directories, and worktree files are
+touched by the already-trusted parent session's own Bash/Edit tools, not by opening a fresh
+session rooted in the worktree.
 
 ## Local scheduled task (Windows) — what's actually running
 

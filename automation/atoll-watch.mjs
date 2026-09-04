@@ -46,13 +46,19 @@ const cleanTitle = (t) => t.replace(/^\[[^\]]*\]\s*/g, "").replace(/\[[^\]]*\]\s
 // This process doesn't reliably get desktop/window access when spawning GUI apps
 // via child_process (confirmed live), so it never launches anything itself — it
 // only emits a machine-readable LAUNCH_JSON line. run-watch.ps1 (native
-// PowerShell, which does have desktop access) parses it and:
-//   1. silently checks out + pulls `base` in the main checkout at `path`
-//   2. opens a NEW Claude Code DESKTOP conversation there via the
-//      claude://code/new?folder=<path> deep link (confirmed live — this is the
-//      same action as the app's own "New Claude Code Session"), with `prompt`
-//      placed on the clipboard, since that deep link has no message parameter
-//      (verified against the app's own bundled source).
+// PowerShell, which does have desktop access) parses it and opens a new
+// TERMINAL window running `claude "<prompt>"` directly, after silently checking
+// out + pulling `base` in the main checkout at `path`.
+//
+// A terminal — not the Claude Code Desktop app — is the launch target on
+// purpose: the prompt is passed straight to a brand-new process as a real CLI
+// argument, so there's no ambiguity about which window receives it. The
+// Desktop app shares one window across every open conversation/tab and its
+// claude://code/new deep link has no message parameter (verified against the
+// app's own bundled source), so driving it hands-free would mean guessing
+// which tab is active via OS-level keystroke injection — tried live, and
+// confirmed unreliable (the keystrokes can land in an unrelated already-open
+// tab). A terminal has none of that ambiguity.
 //
 // Prompt depends on whether this project's own /workflow has the `pickup <ID>` entry
 // mode: tool-portal's does (added alongside this automation); coal's is a separate,
@@ -176,7 +182,7 @@ async function pickup() {
       }
       await tg.sendMessage(
         launch
-          ? `✅ <code>${esc(id)}</code> claimed — opening Claude Code Desktop for it now. The starting prompt is on your clipboard — paste (Ctrl+V) and press Enter to begin.`
+          ? `✅ <code>${esc(id)}</code> claimed — opening a Claude Code window to start it now.`
           : `✅ <code>${esc(id)}</code> claimed. Open Claude Code and run <code>/workflow</code> to start it.`
       );
     } catch (e) {
