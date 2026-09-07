@@ -7,8 +7,10 @@
 //   2. PICKUP  — Telegram replies of "pickup <IDENTIFIER>" assign that issue to you
 //                (self) so the desktop /workflow can consume it. Idempotent.
 //
-// Stateless by design: NOTIFY uses a time window, PICKUP re-reads the Telegram
-// update window and assign-to-self is a safe no-op when already claimed.
+// NOTIFY dedupes via a local gitignored cache (notified.local.json) — single
+// machine, not synced. PICKUP is fully stateless: it re-reads the Telegram
+// update window and acknowledges via Telegram's own offset (see lib/telegram.mjs),
+// so assign-to-self only ever fires once per reply regardless of machine.
 //
 // Flags:
 //   --dry-run       do everything read-only; print what WOULD be sent/claimed
@@ -16,13 +18,33 @@
 //   --notify-only   run job 1 only
 //   --pickup-only   run job 2 only
 
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { listOpenIssues, claimIssue, addLabel, comment } from "./lib/atoll.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const cfg = JSON.parse(readFileSync(join(__dirname, "watch-config.json"), "utf8"));
+
+// Local, gitignored (matches *.local.json), single-machine cache of issue IDs
+// already notified. NOTIFY has no analog to Telegram's offset acknowledgment —
+// it scans a time window fresh every tick — so without this it re-sends the
+// same unclaimed issue every single poll (confirmed live: spammed the same
+// notification every minute for 4+ minutes once the task moved to 1-min
+// polling). Entries older than 2x the lookback window are pruned so the file
+// never grows unbounded.
+const NOTIFIED_CACHE_PATH = join(__dirname, "notified.local.json");
+function loadNotifiedCache() {
+  if (!existsSync(NOTIFIED_CACHE_PATH)) return {};
+  try {
+    return JSON.parse(readFileSync(NOTIFIED_CACHE_PATH, "utf8"));
+  } catch {
+    return {};
+  }
+}
+function saveNotifiedCache(cache) {
+  writeFileSync(NOTIFIED_CACHE_PATH, JSON.stringify(cache, null, 2));
+}
 
 const args = new Set(process.argv.slice(2));
 const DRY = args.has("--dry-run");
@@ -83,6 +105,7 @@ async function notify() {
   const cutoff = Date.now() - lookbackMinutes * 60 * 1000;
   const exclude = new Set(excludeAssigneeIds || []);
   const found = [];
+  const notified = loadNotifiedCache();
 
   for (const proj of cfg.projects) {
     let issues = [];
@@ -100,6 +123,7 @@ async function notify() {
       // skipAssignedToSelf: rely on the CLI identity — an issue already assigned to
       // anyone is "taken"; we only surface unassigned ones unless configured otherwise.
       if (skipAssignedToSelf && it.assignee_id) continue;
+      if (notified[it.identifier]) continue; // already pinged — don't repeat every tick
       found.push({ proj, it });
     }
   }
@@ -120,6 +144,16 @@ async function notify() {
       `Reply <code>${cfg.pickup.keyword} ${esc(id)}</code> to start the workflow.`;
     console.log(`[notify] ${id} — ${cleanTitle(it.title).slice(0, 60)}`);
     if (!DRY && tg) await tg.sendMessage(msg);
+    if (!DRY) notified[id] = Date.now();
+  }
+  if (!DRY) {
+    // Prune entries older than 2x the lookback window — they'd fall out of the
+    // scan window anyway, so there's no reason to keep remembering them.
+    const pruneCutoff = Date.now() - lookbackMinutes * 60 * 1000 * 2;
+    for (const [id, ts] of Object.entries(notified)) {
+      if (ts < pruneCutoff) delete notified[id];
+    }
+    saveNotifiedCache(notified);
   }
   console.log(`[notify] ${DRY ? "(dry) " : ""}sent ${batch.length}`);
 }
