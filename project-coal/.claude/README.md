@@ -23,14 +23,17 @@ own trajectory. Don't port changes between them without checking first.
   `"supabase-demo"`) — these are not secrets; they only work against
   `127.0.0.1:54321` and are the same values Supabase publishes in its own docs.
 
+- `skills/` — the third-party skill pack (`ask-matt`, `claude-handoff`,
+  `code-review`, `grilling`, `tdd`, `teach`, `wayfinder`, `wizard`, and more).
+  In coal's own checkout these live at `.agents/skills/*`, symlinked into
+  `.claude/skills/` — and coal's own `.gitignore` excludes `.agents/skills/`
+  from git (it's meant to be regenerated via coal's `setup-matt-pocock-skills`
+  command, not tracked). Included here anyway, **dereferenced into real files**
+  (not symlinks — a symlink to a path on this machine wouldn't resolve on a
+  different one) so a fresh clone doesn't depend on re-running that setup.
+
 ## What's deliberately NOT here
 
-- **The third-party skill pack** (`ask-matt`, `claude-handoff`, `code-review`,
-  `grilling`, `tdd`, `teach`, `wayfinder`, `wizard`, and ~26 more). In coal's own
-  checkout these live at `.agents/skills/*`, symlinked into `.claude/skills/` —
-  and coal's own `.gitignore` excludes `.agents/skills/` from git. It's a
-  regenerable external pack, not coal-authored content; run
-  `setup-matt-pocock-skills` inside `coal` after cloning if you need it.
 - `.claude/settings.local.json` — machine-local permission overrides, not
   portable.
 - `.claude/scheduled_tasks.lock`, `.claude/.surprises.log` — ephemeral runtime

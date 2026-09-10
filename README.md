@@ -45,9 +45,9 @@ Copy-Item -Recurse -Force project\.claude\* C:\path\to\tool-portal\.claude\
 Copy-Item -Recurse -Force project-coal\.claude\* C:\path\to\coal\.claude\
 ```
 
-`coal` also relies on a third-party skill pack (`ask-matt`, `grilling`, `tdd`, etc.) that its
-own repo gitignores and regenerates via its `setup-matt-pocock-skills` command — that's not
-backed up here on purpose; run that command in `coal` after cloning if you need those skills.
+`project-coal/.claude/skills/` also includes coal's third-party skill pack (`ask-matt`,
+`grilling`, `tdd`, etc.), copied in as real files even though coal's own repo gitignores it —
+so a fresh restore doesn't depend on re-running coal's `setup-matt-pocock-skills` command.
 
 ## Automation (cross-machine)
 
