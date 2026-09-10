@@ -1,0 +1,78 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "coal-dev",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["dev", "--port", "3099"],
+      "port": 3099
+    },
+    {
+      "name": "coal-beta-local",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-lc",
+        "cd 'C:/Users/CSWPC26/Documents/GitHub/coal'; set -a; source .env.local 2>/dev/null; set +a; NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321 NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0 SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU BETA_HOST=beta.localhost NEXT_PUBLIC_BETA_HOST=beta.localhost BETA_WINDOW_OPEN_AT=2026-09-01T00:00:00Z BETA_WINDOW_CLOSE_AT=2026-12-31T23:59:00Z bun dev --port 3098"
+      ],
+      "port": 3098,
+      "url": "http://beta.localhost:3098"
+    },
+    {
+      "name": "coal-worktree-e2e",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-lc",
+        "cd 'C:/Users/CSWPC26/Documents/GitHub/coal-competitive-audit' && node node_modules/next/dist/bin/next dev --port 3100"
+      ],
+      "port": 3100
+    },
+    {
+      "name": "coal-ui-improvements",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-lc",
+        "cd '/c/Users/CSWPC26/Documents/GitHub/coal-ui-improvements' && node node_modules/next/dist/bin/next dev --port 3101"
+      ],
+      "port": 3101
+    },
+    {
+      "name": "coal-vmg-client-reports",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-lc",
+        "cd '/c/Users/CSWPC26/Documents/GitHub/coal-vmg-client-reports' && node node_modules/next/dist/bin/next dev --port 3102"
+      ],
+      "port": 3102
+    },
+    {
+      "name": "coal-brand-page-ux",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-lc",
+        "cd '/c/Users/CSWPC26/Documents/GitHub/coal-brand-page-ux' && node node_modules/next/dist/bin/next dev --port 3103"
+      ],
+      "port": 3103
+    },
+    {
+      "name": "coal-export-pdf",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "C:/Users/CSWPC26/Documents/GitHub/coal-export-pdf/node_modules/next/dist/bin/next",
+        "dev",
+        "--port",
+        "3104"
+      ],
+      "port": 3104
+    },
+    {
+      "name": "coal-brand-bugs",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-lc",
+        "cd '/c/Users/CSWPC26/Documents/GitHub/coal-brand-bugs'; set -a; source .env.local 2>/dev/null; set +a; NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321 NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0 SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU BETA_HOST=beta.localhost NEXT_PUBLIC_BETA_HOST=beta.localhost BETA_WINDOW_OPEN_AT=2026-09-01T00:00:00Z BETA_WINDOW_CLOSE_AT=2026-12-31T23:59:00Z node node_modules/next/dist/bin/next dev --port 3105"
+      ],
+      "port": 3105,
+      "url": "http://localhost:3105"
+    }
+  ]
+}

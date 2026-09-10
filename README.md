@@ -1,19 +1,24 @@
 # claude-code-config
 
-Personal backup of Claude Code custom commands/agents/hooks for the `tool-portal` repo,
-so they can be restored on a different machine (they're gitignored in `tool-portal` itself
-via `.claude/`).
+Personal backup of Claude Code custom commands/agents/hooks for the `tool-portal` and
+`coal` repos, so they can be restored on a different machine (they're gitignored in
+each repo itself via `.claude/`).
 
 ## What's here
 
 - `global/commands/` — self-contained slash commands with no project dependencies.
   Safe to install user-wide.
-- `project/.claude/` — the `/workflow` command plus the subagents, hooks, QA-evidence
-  harness (`qa/`), and `settings.json` it depends on. Specific to the `tool-portal`
-  repo's pipeline; stays project-scoped, not global.
+- `project/.claude/` — **tool-portal's** `/workflow` command plus its subagents, hooks,
+  QA-evidence harness (`qa/`), and `settings.json`. Project-scoped, not global.
+- `project-coal/.claude/` — **coal's own, separate** `/workflow` command plus its
+  subagents, hooks, and `launch.json`. Deliberately not merged with tool-portal's copy —
+  the two pipelines evolved independently and are kept that way; see
+  [`project-coal/.claude/README.md`](project-coal/.claude/README.md) for what's excluded
+  (a gitignored third-party skill pack coal's own repo doesn't track either).
 - `automation/` — machine-independent Atoll→Telegram→/workflow watcher (new-issue
-  pings, `pickup <ID>` claiming) run hourly by a cloud routine. Pure Node ESM, no deps,
-  runs identically on Windows/macOS/cloud. See [`automation/README.md`](automation/README.md).
+  pings, `pickup <ID>` claiming, auto-launch) for **both** tool-portal and coal. Pure
+  Node ESM, no deps. Runs as a local Windows Scheduled Task today; see
+  [`automation/README.md`](automation/README.md).
 
 ## Restore on a new machine
 
@@ -23,25 +28,31 @@ via `.claude/`).
 cp global/commands/*.md ~/.claude/commands/
 ```
 
-**Project-scoped workflow pipeline** (only inside your `tool-portal` checkout):
+**Project-scoped workflow pipelines** (only inside the matching checkout):
 
 ```bash
 cp -r project/.claude/* /path/to/tool-portal/.claude/
+cp -r project-coal/.claude/* /path/to/coal/.claude/
 ```
 
-`tool-portal/.claude/` is gitignored there, so this copy step is needed after every fresh
-clone of that repo.
+`.claude/` is gitignored in both repos, so this copy step is needed after every fresh clone.
 
 On **macOS/Linux** the same commands work as written. On **Windows (PowerShell)** use:
 
 ```powershell
 Copy-Item global\commands\*.md $HOME\.claude\commands\
 Copy-Item -Recurse -Force project\.claude\* C:\path\to\tool-portal\.claude\
+Copy-Item -Recurse -Force project-coal\.claude\* C:\path\to\coal\.claude\
 ```
+
+`coal` also relies on a third-party skill pack (`ask-matt`, `grilling`, `tdd`, etc.) that its
+own repo gitignores and regenerates via its `setup-matt-pocock-skills` command — that's not
+backed up here on purpose; run that command in `coal` after cloning if you need those skills.
 
 ## Automation (cross-machine)
 
 The `automation/` watcher needs no per-machine install beyond Node 18+ and the Atoll CLI.
-Local testing uses the `blitz` Atoll profile; the always-on hourly watcher runs as a cloud
-routine (machine-independent). Full setup — env secrets, Telegram chat ID, routine creation,
-and macOS notes — is in [`automation/README.md`](automation/README.md).
+Local testing uses the `blitz` Atoll profile; the always-on watcher runs as a local Windows
+Scheduled Task (every 1 minute) that auto-launches a terminal running `/workflow pickup <ID>`
+for either project. Full setup — env secrets, Telegram chat ID, task creation, and macOS
+notes — is in [`automation/README.md`](automation/README.md).
