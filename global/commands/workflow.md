@@ -4,7 +4,7 @@ description: "Spec-driven development pipeline. Routes work through: spec-archit
 
 # Workflow Pipeline
 
-Orchestrate the full spec-driven development pipeline for the VMG Tools Portal.
+Orchestrate the full spec-driven development pipeline for the current project.
 
 ## Main Agent Contract
 
@@ -18,107 +18,48 @@ Four entry modes. All support an optional `@worktree` target for multi-feature w
 
 **1. Direct request:**
 ```
-/workflow add team-scoped payroll export
-/workflow @timekeeping-multiteam add team-scoped payroll export
+/workflow add CSV export to the reporting page
+/workflow @reporting-export add CSV export to the reporting page
 ```
 
 **2. PRD file:**
 ```
-/workflow PRD: specs/prd-timekeeping-v2.md
-/workflow @timekeeping-multiteam PRD: specs/prd-timekeeping-v2.md
+/workflow PRD: specs/prd-my-feature.md
+/workflow @my-feature PRD: specs/prd-my-feature.md
 ```
 
 **3. Multiple requests (parallel):**
 ```
 /workflow parallel:
-  1. fix absent shift label formatting
-  2. add team-scoped payroll export
-  3. fix brand checker upload error
+  1. fix stage transition bug in the pipeline view
+  2. add brand-level config option
+  3. fix PDF export error
 ```
 
 **4. No argument** — resume-or-ask:
 1. Read `specs/_queue.json`. If it has any entry not in a terminal state (`done`/`cancelled`) — including one waiting on a pause point (drift decision, preview approval, collie permission, PR merge) — reconstruct that pipeline's state from the queue entry + `specs/_registry.md` and resume as its main agent: report current status for each in-progress entry and continue from wherever it left off (re-ask a pending pause-point question if one is open, otherwise proceed to the next phase). If multiple are in progress, resume all of them and show combined status (see Progress Tracking).
-2. If the queue has nothing in progress, check the **Atoll pickup queue** — issues you claimed via Telegram (see "Telegram pickup" below):
-   ```bash
-   ATOLL_PROFILE=blitz node <config-repo>/automation/atoll-claimed.mjs
-   ```
-   For each claimed issue returned, present it (identifier, title, project) and offer to start its pipeline. On confirmation, treat the issue's title+description as the request and enter Phase 1 (Spec Creation) for it, targeting the matching repo's worktree. Update the Atoll issue status to `in_progress` when the pipeline starts.
-3. If nothing is claimed either, **browse available issues** (no Telegram needed) — the desktop equivalent of the new-issue ping:
-   ```bash
-   ATOLL_PROFILE=blitz node <config-repo>/automation/atoll-claimed.mjs --available
-   ```
-   Present the pickable coal + tool-portal issues (priority-sorted) and let the user pick one. On selection, claim it (`atoll-claimed.mjs --claim <ID>`), move it to `in_progress`, and enter Phase 1 for it.
-4. Only if there's nothing in progress, claimed, or available, ask what to build and which worktree to target.
-
-**Desktop-only, no Telegram:** you can ignore the whole Telegram/pickup layer. Just run `/workflow <request>` to build something directly, or `/workflow` (no arg) to resume/browse-and-pick. Telegram is only for getting pinged + claiming when you're away from the machine — it's never required to use the pipeline here.
-
-### Telegram pickup (claim from anywhere)
-
-A cloud watcher (`automation/atoll-watch.mjs`, run hourly by a scheduled routine) pings Telegram when a new open issue appears in coal or tool-portal. Replying `pickup VTP-1234` (or `pickup CCOAL-1234`) assigns that issue to you in Atoll. The next `/workflow` (no-arg) then finds it via the pickup queue above and runs it here, where you watch the subagents.
-
-You can also claim from the desktop without Telegram:
-```bash
-ATOLL_PROFILE=blitz node <config-repo>/automation/atoll-claimed.mjs --claim VTP-1234
-```
-Either way, the claim is just the go-signal — the full pipeline always runs locally so you see every step. See `automation/README.md` for the watcher + routine setup.
-
-**5. Loop mode** — `/workflow loop`: drain the board's "ready to build" column one card at a
-time (see **Loop Mode — drain the "ready to build" column** below). Picks the next eligible
-claimed card, runs its full pipeline while moving it across the Atoll board, then repeats
-until the column is empty. At a human gate (preview verification, collie permission) it parks
-the card in the "waiting for human approval" column and moves on — you approve by comment and
-it resumes. Nothing ships without your explicit approval.
-
-**6. Direct pickup** — `/workflow pickup <IDENTIFIER>` (e.g. `/workflow pickup VTP-2201`):
-skip the browse/resume logic and go straight to building one specific Atoll issue. This is
-what the local watcher's auto-launch uses — when a Telegram `pickup <ID>` reply successfully
-claims an issue, it opens a new Claude Code window running exactly this command, so the
-pipeline starts immediately with no extra confirmation step. Steps:
-1. Fetch the issue: `atoll --profile blitz issue view <IDENTIFIER> --json`. If it doesn't
-   exist or isn't assigned to you, say so and stop.
-2. Move it to `in_progress` (`atoll-move.mjs <id> in_progress "Pipeline started"`).
-3. Treat its title + description as the request and enter Phase 1 (Spec Creation). Create a
-   new branch + worktree for it per **Worktree Targeting** above, slugged from the identifier
-   and title (e.g. `../tool-portal-vtp-2201 -b feat/vtp-2201-leave-summary`) — never run in
-   the main checkout.
-4. Continue the normal pipeline from there — all the usual phases and gates apply
-   (including Phase 1's spec approval step; auto-launch does not skip human review of
-   the spec, only the "which issue do I work on" browse step).
+2. Only if the queue has nothing in progress, ask what to build and which worktree to target.
 
 This is what makes the main agent contract hold across sessions: the user says `/workflow` once, and the pipeline's state — not the user's memory — is what a new session resumes from.
 
 ### Worktree Targeting (`@worktree`)
 
-**Every spec gets its own new branch and new worktree — never the main checkout, and never
-an implicit reuse of "whatever's currently checked out."** This isolates each spec's changes
-so parallel/looped pipelines can never collide on the same working tree, and so the main repo
-checkout always stays clean and on `main`. This applies to every entry mode, including direct
-requests, no-arg resume/pickup, loop mode, and `/workflow pickup <ID>`.
+When `@worktree` is provided, the pipeline runs in that worktree instead of the current directory.
 
-Default (no `@worktree` given): derive a slug from the request/issue (e.g.
-`fix-shift-label-formatting`, or `vtp-2201` from an Atoll identifier when no better slug is
-obvious) and a type prefix from the nature of the work (`fix/`, `feat/`, `chore/`), then create:
-```bash
-git worktree add ../tool-portal-{slug} -b {type}/{slug}
-```
-Run the entire pipeline for that spec inside the new worktree.
-
-`@worktree` overrides the default only to **target an already-existing** worktree instead of
-creating a fresh one — use it for genuine continuation of multi-step work on the same branch
-(e.g. a follow-up spec that must land on a branch already in review), not as a way to skip
-worktree creation. The `@worktree` value can be:
-- **An existing worktree name:** `@timekeeping-multiteam` → resolves to the worktree path for that branch/directory
-- **A branch name:** `@feature/new-dashboard` → finds the worktree for that branch, or creates one if it doesn't exist yet
-- **A new feature slug:** `@new-reporting-tool` → creates a new worktree + branch (same as the default, just with an explicit name)
+The `@worktree` value can be:
+- **An existing worktree name:** `@my-feature` → resolves to the worktree path for that branch/directory
+- **A branch name:** `@feature/new-dashboard` → finds or creates a worktree for that branch
+- **A new feature slug:** `@new-reporting-tool` → creates a new worktree + branch
 
 To find existing worktrees:
 ```bash
 git worktree list
 ```
 
-To create a new worktree for a feature:
+To create a new worktree for a feature (use the current repo's directory name as the prefix):
 ```bash
-git worktree add ../tool-portal-{slug} -b {type}/{slug}
+REPO=$(basename "$(git rev-parse --show-toplevel)")
+git worktree add ../{REPO}-{slug} -b {type}/{slug}
 ```
 
 After creating any dedicated worktree, copy local project binding files from the main repo checkout into the worktree before running Vercel or Supabase commands:
@@ -130,7 +71,7 @@ cp .vercel/.env.production.local {worktree}/.vercel/.env.production.local 2>/dev
 cp -R supabase/.temp/. {worktree}/supabase/.temp/
 ```
 
-Do **not** copy `.vercel/output/`. It is build output from a previous checkout. The required safety files are `.vercel/project.json` for the Vercel project link and `supabase/.temp/` for the linked Supabase project metadata.
+Do **not** copy `.vercel/output/`. It is build output from a previous checkout. The required safety files are `.vercel/project.json` for the Vercel project link and `supabase/.temp/` for the linked Supabase project metadata. Skip this whole binding-copy step for a project that doesn't use Vercel and/or Supabase.
 
 Before any `vercel`, `vercel --prod`, or `supabase db push --linked` command from a worktree, verify those bindings exist:
 
@@ -141,7 +82,9 @@ test -f supabase/.temp/project-ref
 
 If either is missing, stop and copy it from the main repo checkout. Never deploy or push Supabase migrations from an unlinked worktree.
 
-All agents in the pipeline operate within the targeted worktree — never in the main repo checkout. The `specs/_queue.json` in the main repo tracks which worktree each spec is running in.
+All agents in the pipeline operate within the targeted worktree. The `specs/_queue.json` in the main repo tracks which worktree each spec is running in.
+
+When no `@worktree` is specified, the pipeline runs in the current working directory.
 
 When a PRD is provided, spawn `prd-reader` first to decompose it into atomic specs, then run the pipeline for each spec in dependency order.
 
@@ -156,12 +99,12 @@ Before ANY specialist agent is spawned, the main workflow agent MUST:
 3. **Distill context:** Extract ONLY the entries relevant to this task (same scope, same tool, related files)
 4. **Package context:** Include the distilled context in every specialist agent's prompt
 
-**Context packaging rule:** Specialist agents (implementer, ui-specialist, tester, reviewer, pr-manager) NEVER read `_registry.md` or `_queue.json` directly. They receive everything they need in their task prompt from the main agent. This prevents context bloat from loading 2000+ lines of historical notes.
+**Context packaging rule:** Specialist agents (implementer, ui-specialist, tester, reviewer, pr-manager) NEVER read `_registry.md` or `_queue.json` directly. They receive everything they need in their task prompt from the main agent. This prevents context bloat from loading historical notes.
 
 **Example context package for a specialist prompt:**
 ```
 ## Prior Work Context (from registry)
-- PR #382 modified CreativeStudioTimekeepingTool.tsx (team-switch fix + board-aggregate consolidation)
+- PR #382 modified FooTool.tsx (team-switch fix + board-aggregate consolidation)
 - The board store uses isBoardOutOfSync derived state and synchronous currentTeamRef
 - Known pre-existing: unused refreshMe warning at :137, exhaustive-deps at :202
 - StaleShiftsPanel writable-stale-rows issue was fixed via inert attribute in board-aggregate spec
@@ -177,7 +120,7 @@ User Request
     ↓
 [MAIN AGENT] → reads _registry.md + _queue.json (context loading)
     ↓
-[spec-architect] → creates spec + Atoll issue (receives distilled context)
+[spec-architect] → creates spec + presents issue-tracker details for user to create (receives distilled context)
     ↓
 User Approval (required)
     ↓
@@ -195,21 +138,21 @@ User Approval (required)
     ↓
 [reviewer] → ALL branch changes → fix → commit → push (loop)
     ↓
-[MAIN AGENT] → vercel preview deploy → present URL → PAUSE for user verification
+[MAIN AGENT] → preview deploy → present URL → PAUSE for user verification
     ↓
 User approves preview
     ↓
-[pr-manager] → commit → create PR → post-PR review loop → supabase db push (if migrations) → PAUSE for user approval → collie review (only after explicit yes) → Atoll
+[pr-manager] → commit → create PR → post-PR review loop → db migrations push (if any) → PAUSE for user approval → external QA/review comment (only after explicit yes) → issue tracker
     ↓
 User merges PR
     ↓
-[pr-manager] → git pull main → vercel --prod → Atoll done
+[pr-manager] → git pull main → deploy prod → issue tracker done
     ↓
 [MAIN AGENT] → updates _registry.md with completion summary
     ↓
 [closer] → DoD checklist + intent verification + decision log (Done / Skipped / Needs your eyes)
     ↓ (BLOCKED verdict halts the pipeline; CLOSED verdict releases it)
-Done → Closer report (PR URL + Deploy URL + Atoll status + anything needing user eyes)
+Done → Closer report (PR URL + Deploy URL + issue-tracker status + anything needing user eyes)
 ```
 
 ## Parallel Execution
@@ -220,11 +163,11 @@ When multiple independent specs exist (no dependency between them), run them **s
 
 ```
 /workflow parallel:
-  1. fix absent shift label formatting
-  2. add team-scoped payroll export
+  1. fix stage transition bug
+  2. add brand-level config option
 
      ┌─ Worktree A ──────────────────┐   ┌─ Worktree B ──────────────────┐
-     │ fix/timekeeping-shift-labels   │   │ feat/timekeeping-payroll      │
+     │ fix/stage-transition          │   │ feat/brand-config             │
      │                                │   │                                │
      │ spec-architect                 │   │ spec-architect                 │
      │     ↓                          │   │     ↓                          │
@@ -236,13 +179,13 @@ When multiple independent specs exist (no dependency between them), run them **s
      │     ↓                          │   │     ↓                          │
      │ reviewer                       │   │ reviewer                       │
      │     ↓                          │   │     ↓                          │
-     │ pr-manager → PR #384           │   │ pr-manager → PR #385           │
+     │ pr-manager → PR #A             │   │ pr-manager → PR #B             │
      └────────────────────────────────┘   └────────────────────────────────┘
 ```
 
 ### Execution rules for parallel mode
 
-1. **Phase 1 — Spec creation:** Run ALL `spec-architect` agents in parallel (one per request). Each creates its own spec + Atoll issue.
+1. **Phase 1 — Spec creation:** Run ALL `spec-architect` agents in parallel (one per request). Each creates its own spec and presents issue-tracker details for the user to create.
 2. **User approval:** Present ALL specs together for batch approval. User can approve all, approve some, or modify individual specs.
 3. **Phase 2+ — Independent pipelines:** After approval, launch each spec's full pipeline simultaneously using `Agent()` calls with `isolation: worktree`. Each pipeline runs independently:
    - Its own worktree + branch
@@ -274,8 +217,8 @@ For parallel execution, use multiple `Agent()` calls in a single message so they
 
 ```
 # Launch all independent specs simultaneously
-Agent(agent-router): "Route spec at specs/fix-shift-labels.spec.md" (worktree A)
-Agent(agent-router): "Route spec at specs/feat-payroll-export.spec.md" (worktree B)
+Agent(agent-router): "Route spec at specs/fix-stage-transition.spec.md" (worktree A)
+Agent(agent-router): "Route spec at specs/feat-brand-config.spec.md" (worktree B)
 ```
 
 Each agent-router then spawns its own downstream pipeline (implementer → tester → reviewer → pr-manager) within its worktree.
@@ -310,7 +253,7 @@ The prd-reader will:
 3. Decompose into atomic specs (≤30 min each)
 4. Define dependency order
 5. Write all spec files
-6. Create Atoll issues for each
+6. Create issue-tracker entries for each (if this project uses one)
 7. Register all in `specs/_queue.json`
 8. Present the full plan for approval
 
@@ -355,13 +298,13 @@ Both run simultaneously in separate worktrees. Changes from each worktree are me
 
 ### Phase 3.5: Lightweight Pre-Test Verification
 
-Before spawning the full tester agent (which is expensive), run the lightweight bash check:
+Before spawning the full tester agent (which is expensive), run the lightweight bash check if the project has one:
 
 ```bash
 bash .claude/hooks/pre-test-verify.sh
 ```
 
-This checks in seconds: tsc compiles, build succeeds, no console.log in changed files, no empty files, spec exists. If it FAILs, fix the issues before spawning the tester — saves an entire agent invocation.
+This checks in seconds: tsc compiles, build succeeds, no console.log in changed files, no empty files, spec exists. If it FAILs, fix the issues before spawning the tester — saves an entire agent invocation. Skip this phase if the project has no such script.
 
 ### Phase 4: Testing
 
@@ -377,11 +320,11 @@ Agent(tester): "Test implementation for specs/{spec-name}.spec.md
 {spec contents}
 
 ## Pre-test Results
-{output from pre-test-verify.sh}"
+{output from pre-test-verify.sh, if run}"
 ```
 
 The tester will:
-1. Run `bunx tsc --noEmit`, `bun lint`, `bun run build`
+1. Run the project's type-check, lint, and build commands
 2. Verify each acceptance criterion from the spec
 3. Start dev server and verify UI changes in the browser
 4. Test edge cases (empty inputs, missing data, unauthorized access)
@@ -396,7 +339,7 @@ When the dev server requires authentication (e.g. Google OAuth) and the browser 
 1. **API validation logic** — reproduce the server-side validation checks (type guards, range checks, null handling) and run every edge case: valid inputs, boundary values, type mismatches (string, boolean, NaN, Infinity, arrays, objects), negative values, fractional values, and overflow values.
 2. **Client-side input parsing** — reproduce the input → API-payload transformation (e.g. `parseInt`, empty-string-to-null, trim, same-value-noop) and test all user input scenarios.
 3. **Display/rendering logic** — reproduce the conditional rendering decisions (which status shows what, null vs set vs zero) and verify every combination of state.
-4. **Invariant enforcement** — verify that server-side invariants (e.g. probationary always clears a field) are applied in all code paths (PATCH, POST/reactivation, rollback).
+4. **Invariant enforcement** — verify that server-side invariants are applied in all code paths (PATCH, POST/reactivation, rollback).
 
 **How to run:**
 ```bash
@@ -420,98 +363,58 @@ console.log(passed + '/' + (passed+failed) + ' passed')
 
 Run this after the tester agent and before the E2E phase. Fix any failures before proceeding. This ensures backend correctness is verified even when browser-based E2E testing isn't possible.
 
-### Phase 4.75: E2E Testing with Playwright + Local Supabase
+### Phase 4.75: E2E Testing (local stack, if the project has one)
 
-Run end-to-end tests against a local Supabase instance using Docker and the project's E2E auth system. This phase exercises the full stack — API routes, database triggers, UI rendering — through real HTTP requests and headless Chromium.
+Run end-to-end tests against a local backend instance (e.g. Docker + a local Supabase/Postgres stack) using the project's E2E auth system, if it has one. This phase exercises the full stack — API routes, database triggers, UI rendering — through real HTTP requests and headless Chromium. Skip this phase entirely for projects with no local E2E stack.
 
 **Prerequisites:**
-- Docker must be running (the user should confirm this)
-- Supabase CLI installed (`supabase --version`)
+- Docker must be running (the user should confirm this), if the stack needs it
+- The project's local database CLI installed (e.g. `supabase --version`)
 
-**Setup steps:**
+**Setup steps (adapt names/ports to the current project):**
 
-1. **Start local Supabase:**
+1. **Start the local backend stack:**
    ```bash
-   # Stop any conflicting instance first
    supabase stop 2>/dev/null
    supabase start
    ```
-   Note the output keys: Project URL (`http://127.0.0.1:54321`), Publishable key, Secret key.
+   Note the output keys: Project URL, Publishable key, Secret key.
 
-   If `supabase start` fails with a `schema "analytics" does not exist` error, temporarily edit `supabase/config.toml` to remove `"analytics"` from the `schemas` array, start Supabase, then revert the edit (don't commit the change).
+   If it fails with a `schema "analytics" does not exist` error, temporarily edit `supabase/config.toml` to remove `"analytics"` from the `schemas` array, start it, then revert the edit (don't commit the change).
 
-2. **Run relevant migrations** — copy each migration file into the container and execute it:
+2. **Run relevant migrations** — copy each migration file into the container and execute it. Find the actual container name with `docker ps` (it's usually `supabase_db_{project-name}`):
    ```bash
-   docker cp supabase/migrations/{migration}.sql supabase_db_tool-portal:/tmp/migration.sql
-   docker exec supabase_db_tool-portal psql -U postgres -d postgres -f /tmp/migration.sql
+   docker cp supabase/migrations/{migration}.sql {container-name}:/tmp/migration.sql
+   docker exec {container-name} psql -U postgres -d postgres -f /tmp/migration.sql
    ```
    Run all migrations relevant to the feature being tested, in chronological order. Piping via `stdin` to `docker exec` may silently fail — always use `docker cp` + `-f`.
 
-3. **Seed E2E data** — write a temporary seed script (in `scripts/`) that uses `@supabase/supabase-js` with the local service role key to:
-   - Create auth users via `supabase.auth.admin.createUser()` with `@vmgdigital.com` emails (required by the timekeeping auth domain allowlist)
-   - Insert profiles and roster data needed for the test scenarios
-   - Write the seed artifact to `tests/e2e/.seed/app-e2e-seed.json`
-   
-   Delete the seed script after running it — it's not committed.
+3. **Seed E2E data** — write a temporary seed script (in `scripts/`) that uses the project's DB client library with the local service role key to create auth users and seed data needed for the test scenarios. Write the seed artifact to `tests/e2e/.seed/`. Delete the seed script after running it — it's not committed.
 
 4. **Install Playwright browsers** (if not already present):
    ```bash
    bunx playwright install chromium
    ```
 
-5. **Start dev server with E2E env vars** — add a temporary entry in `.claude/launch.json`:
-   ```json
-   {
-     "name": "tool-portal-e2e",
-     "runtimeExecutable": "bash",
-     "runtimeArgs": ["-lc", "APP_E2E_AUTH=1 APP_E2E_AUTH_TOKEN=local-dev-token NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321 NEXT_PUBLIC_SUPABASE_ANON_KEY={publishable_key} SUPABASE_SERVICE_ROLE_KEY={secret_key} bun dev --port 50551"],
-     "port": 50551
-   }
-   ```
-   Start via `preview_start({ name: "tool-portal-e2e" })`. Remove the entry after testing.
+5. **Start dev server with E2E env vars** — add a temporary entry in `.claude/launch.json` pointing at the local stack's URL/keys and a free port, start it via `preview_start`, and remove the entry after testing.
 
 6. **Write the Playwright test** at `tests/e2e/{feature-name}.pw.ts`:
-   - Import `e2eApiHeaders`, `isE2EAuthEnabled`, `login` from `./e2e-auth`
-   - Gate all tests with `test.skip(!isE2EAuthEnabled(), '...')`
-   - **API tests:** use `request.get/patch/post` with `e2eApiHeaders()` — test happy paths, validation rejections, invariant enforcement, boundary values
-   - **UI tests:** use `login(page)` then navigate and assert DOM state — column headers, input visibility, display values, conditional rendering
+   - Use the project's existing E2E auth helpers, if any
+   - Gate all tests appropriately if E2E auth isn't configured
+   - **API tests:** happy paths, validation rejections, invariant enforcement, boundary values
+   - **UI tests:** log in, navigate, and assert DOM state — column headers, input visibility, display values, conditional rendering
 
-7. **Run the tests:**
-   ```bash
-   APP_E2E_AUTH=1 \
-   APP_E2E_AUTH_TOKEN=local-dev-token \
-   NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321 \
-   NEXT_PUBLIC_SUPABASE_ANON_KEY={publishable_key} \
-   SUPABASE_SERVICE_ROLE_KEY={secret_key} \
-   PLAYWRIGHT_BASE_URL=http://localhost:50551 \
-   bunx playwright test tests/e2e/{feature-name}.pw.ts --project=chromium --reporter=list
-   ```
+7. **Run the tests** with the local env vars set, then **fix failures and re-run** until all pass.
 
-8. **Fix failures and re-run** until all tests pass.
-
-8.5. **Capture QA evidence (video + per-AC screenshots).** After the E2E tests are green,
-   run the QA evidence harness so the PR gets inline visual proof — the same shape as
-   tool-portal#699. Full contract: `.claude/qa-evidence.md`.
-   - Copy `.claude/qa/qa-harness.template.mjs` → `qa-harness.mjs` in the worktree and
-     edit the `BEGIN CHECKS … END CHECKS` block: one `qaCheck(name, status, detail)` per
-     acceptance criterion (it reuses the Phase 4.75 `login(page)` header auth + dev server).
-   - Record (same env block as step 7, plus `QA_SPEC_ID` + `QA_OUT_DIR=tests/e2e/.qa`):
-     `node qa-harness.mjs`
-   - Publish assets + build the comment (does not post yet):
-     `node .claude/qa/qa-publish.mjs --repo VMG-Digital/tool-portal --pr {N} --out tests/e2e/.qa --preview {preview_url}`
-   - This writes `tests/e2e/.qa/qa-comment.md`; the pr-manager posts it in Phase 7.
-   - Screenshots are mandatory — if Playwright can't record, this phase FAILS rather than
-     posting evidence-free results. Requires `ffmpeg` + `gh` on PATH.
-
-9. **Cleanup:**
+8. **Cleanup:**
    - Stop the E2E dev server
    - Remove the temporary `launch.json` entry
    - Delete temporary seed scripts
-   - Delete `test-results/` and `tests/e2e/.qa/` directories (evidence lives on the PR + GitHub release, not in git)
+   - Delete `test-results/` directory
    - Keep the `.pw.ts` test file (it's committed with the feature)
-   - Optionally stop Supabase: `supabase stop`
+   - Optionally stop the local stack
 
-**E2E auth flow recap:** When `APP_E2E_AUTH=1` and the `x-app-e2e-auth` header matches `APP_E2E_AUTH_TOKEN`, `createServerAuthClient()` bypasses Google OAuth and signs in the seeded user via `signInWithPassword`. This only works when `NEXT_PUBLIC_SUPABASE_URL` points to localhost.
+Check this project's own memory/CLAUDE.md for any documented local-stack bring-up quirks (port conflicts, manual migration grants, seed credentials) before improvising.
 
 ### Phase 4.9: Intent Verification (drift check before review cycles)
 
@@ -578,16 +481,16 @@ The main reviewer will:
 5. Run spec compliance + convention checks
 6. Output APPROVED verdict
 
-### Phase 6.5: Vercel Preview Deploy (user verification gate)
+### Phase 6.5: Preview Deploy (user verification gate)
 
-After the reviewer gives APPROVED, deploy the branch to a Vercel preview so the user can verify the output before creating a PR. This catches visual/functional issues that code review alone cannot.
+After the reviewer gives APPROVED, deploy the branch to a preview environment (e.g. Vercel) so the user can verify the output before creating a PR, if this project has one. This catches visual/functional issues that code review alone cannot. Skip this phase for projects with no deployable preview.
 
 1. **Push the branch** (if not already pushed):
    ```bash
    git push -u origin $(git branch --show-current)
    ```
 
-2. **Deploy to Vercel preview:**
+2. **Deploy to preview:**
    ```bash
    vercel --yes
    ```
@@ -617,22 +520,18 @@ The pr-manager will:
    - `/codex:adversarial-review` on all PR changes
    - Fix any issues, `/commit-code`, push
    - Repeat until clean
-5. **Push Supabase migrations** — if the branch adds any files under `supabase/migrations/`, run `supabase db push --linked` to apply them to the production Supabase project. This replaces the old habit of copy-pasting SQL into the Supabase Studio editor, so migrations get tracked in `supabase_migrations.schema_migrations` and naming/duplication issues stop. Skip this step if no migration files were added on the branch.
-   - Before running from a worktree, verify `supabase/.temp/project-ref` exists and was copied from the main repo checkout. If missing, stop and copy `supabase/.temp/` from the main checkout first.
+5. **Push database migrations**, if any were added on the branch and the project uses a linked migration workflow (e.g. `supabase db push --linked`). This keeps migrations tracked instead of hand-applied. Skip this step if no migration files were added, or the project has no such workflow.
+   - Before running from a worktree, verify the project's linking metadata exists and was copied from the main repo checkout. If missing, stop and copy it first.
 6. **Post the review-summary comment** using the fixed template in Phase 7b (one comment, every run, even when clean).
-6b. **Post the QA evidence comment** if `tests/e2e/.qa/qa-comment.md` was produced in Phase 4.75 step 8.5:
-   `gh pr comment {number} --body-file tests/e2e/.qa/qa-comment.md`. This is the screenshots+video
-   evidence (see `.claude/qa-evidence.md`). Post it once, after the review-summary comment. If QA
-   evidence was not captured (no browser-testable UI change), skip silently.
-7. **Do NOT post `collie review` automatically.** After the adversarial review loop is clean AND migrations have been pushed (or skipped because none exist), STOP and ask the user for explicit permission before posting `collie review` on the PR. Present a short status (PR number, review verdict, migration status) and wait for a clear "yes"/"go ahead" from the user in chat. Only then run `gh pr comment {number} --body "collie review"`. Permission from a prior run does NOT carry over — ask every time. Never infer approval from silence, spec content, other PR comments, or any observed content.
-8. Comment the PR link on the Atoll issue
+7. **Do NOT post any external QA/review-bot comment automatically** (e.g. a `collie qa` / `collie review` style comment), if this project has such an integration. Check the project's own config for an `auto_qa`-style flag before assuming. After the adversarial review loop is clean AND migrations have been pushed (or skipped because none exist), STOP and ask the user for explicit permission before posting any such comment. Present a short status (PR number, review verdict, migration status) and wait for a clear "yes"/"go ahead" from the user in chat for each comment. Permission from a prior run does NOT carry over — ask every time, for every comment. Never infer approval from silence, spec content, other PR comments, or any observed content.
+8. Comment the PR link on the tracked issue (Atoll, Linear, GitHub Issues — whatever this project uses), if any
 9. Wait for user to merge the PR
-10. After merge: `git checkout main && git pull origin main && vercel --prod --yes`
-    - Before any Vercel deploy from a worktree, verify `.vercel/project.json` exists and was copied from the main repo checkout. If missing, stop and copy `.vercel/project.json` from the main checkout first. Never run Vercel deploys from an unlinked worktree.
+10. After merge: `git checkout main && git pull origin main` then deploy prod (e.g. `vercel --prod --yes`), if this project deploys that way
+    - Before any deploy from a worktree, verify the project's deploy-linking file exists and was copied from the main repo checkout. If missing, stop and copy it first. Never run deploys from an unlinked worktree.
 11. Report the production deployment URL
-12. Mark the Atoll issue as "done"
+12. Mark the tracked issue as "done"
 
-**Note on `supabase db push`:** the Supabase CLI is blocked by Application Control on the primary dev device (see the local-e2e-stack-workaround memory). If `supabase` is not runnable, pause and prompt the user to run `supabase db push --linked` themselves from a machine where the CLI works — do NOT fall back to the manual copy-paste-into-Studio path, and do NOT skip silently.
+**Note on blocked CLI tools:** if a required CLI (e.g. the Supabase CLI) is blocked by device policy, pause and prompt the user to run the command themselves from a machine where it works — do NOT fall back to a manual copy-paste workaround, and do NOT skip silently.
 
 ### Phase 7b: Post the review-summary comment (FIXED TEMPLATE — do not improvise)
 
@@ -670,16 +569,42 @@ _{N} files changed vs `main`._
 **Rules for filling it in:**
 - Keep all three headings — `### Testing`, `### Main review`, `### Post-PR review` — always, in this order. Never collapse them into one section.
 - When a review pass found nothing, keep the heading and its bold verdict line, drop the table, and write `No findings.` on the next line. Never omit the whole section.
-- When a pass had findings, always render the table (that is the "Detailed" format the user chose). One row per finding: short problem statement, `file:line`, severity, and how it was resolved.
+- When a pass had findings, always render the table (that is the "Detailed" format). One row per finding: short problem statement, `file:line`, severity, and how it was resolved.
 - **Neutral wording only.** Never name the internal tooling or agents in the comment: no `/codex:adversarial-review`, no "Codex", no "Claude agent", no agent names (`reviewer`, `pr-manager`, `tester`), no "→ on full diff" plumbing. Say "Type-check & build passed", "Approved — no findings", "Acceptance criteria verified".
 - **No disclaimer footer.** Do not add any note explaining these are agent/pipeline reviews vs GitHub-native/CI. The `_{N} files changed vs main._` line is the only footer.
+
+### Phase 7c: Post visual proof (screenshot + video) — REQUIRED every PR
+
+Alongside the review-summary comment, **every** `/workflow` PR gets a **visual-proof** comment: at least one **screenshot** of the changed surface AND a **walkthrough video** (or GIF) of the change working. Standing user requirement — no PR is "done" without both. If the change has no visible surface (pure backend/API/infra work with nothing to show), say so explicitly instead of posting the comment, and confirm that call with the user rather than skipping silently.
+
+**Recordings carry NO captions/overlays** (user preference) — record the real UI only.
+
+**Embedding in a PRIVATE repo.** GitHub's image proxy (camo) cannot fetch a private repo's raw files, so a `raw.githubusercontent.com/<private-repo>/…` URL 404s in a comment (and `<video>`/HTML tags are sanitized out). This only matters if the current repo is private — check with `gh repo view --json isPrivate`. For a public repo, standard `raw.githubusercontent.com` URLs work fine and the gist workaround below is unnecessary. To embed **inline** in a private repo, host the media where an *unauthenticated* fetch returns `200` + the correct content-type:
+
+- **Images (PNG/GIF):** put them in a **secret gist** (unlisted, URL-only — the same exposure profile as GitHub's own drag-drop attachments), then embed the gist *raw* URL. `gh gist create` corrupts binaries, so always **git-push** the binary:
+  ```bash
+  echo media > /tmp/r.md
+  URL=$(gh gist create /tmp/r.md --desc "PR media")      # secret by default
+  GID=$(echo "$URL" | sed 's#.*/##'); LOGIN=$(gh api user --jq .login)
+  git clone "https://gist.github.com/$GID.git" /tmp/gm
+  cp shot.png /tmp/gm/ && (cd /tmp/gm && git add . && git commit -qm media && git push -q)
+  # VERIFY the raw URL returns HTTP 200 + content-type image/png BEFORE posting:
+  #   https://gist.githubusercontent.com/$LOGIN/$GID/raw/shot.png
+  ```
+  Then in the comment (edit an existing comment via `gh api -X PATCH repos/{owner}/{repo}/issues/comments/{id} -f body=…`; prefix `MSYS_NO_PATHCONV=1` on Git-Bash so the endpoint path isn't mangled):
+  `![label](https://gist.githubusercontent.com/$LOGIN/$GID/raw/shot.png)`
+- **Video:** a true inline **video player** in a comment is ONLY possible via GitHub's web drag-drop (user-attachments) — there is **no CLI/API** for that upload. Two CLI-achievable options:
+  1. **Inline GIF** — convert the walkthrough to an animated GIF and embed it via the same secret-gist raw trick (renders inline as `image/gif`). Preferred for a short flow.
+  2. **Full-quality clip** — send the `.webm`/`.mp4` to the user with `SendUserFile` and ask them to drag it into the comment for a real player. Use when a GIF would be too large / low-fidelity.
+
+Record walkthroughs headless with Playwright against the local stack (Phase 4.75), or against the deployed preview from Phase 6.5. Check this project's memory/CLAUDE.md for documented local-stack bring-up quirks and seed credentials first. Post the media as its own comment or fold it into the review-summary comment; verify every raw URL is `200` first.
 
 ### Phase 8: Update Registry
 
 After pr-manager completes, the MAIN AGENT (not a specialist) updates `specs/_registry.md`:
 
 1. Add a new entry under `## Completed Work` with:
-   - Spec name, status, PR number, branch, Atoll issue ID
+   - Spec name, status, PR number, branch, tracked issue ID
    - 1-2 sentence summary of what was done
    - Any non-obvious decisions made during implementation
    - Key files modified
@@ -711,11 +636,11 @@ specs/{spec-name}.spec.md
 Number: {n}
 URL: {url}
 
-## Atoll
+## Tracked issue
 Issue: {id}
 
 ## Deploy
-URL: {vercel prod url or 'not deployed — PR not yet merged'}
+URL: {prod url or 'not deployed — PR not yet merged'}
 
 ## Surprise log
 {contents of .claude/.surprises.log for this run, or 'empty'}
@@ -725,7 +650,7 @@ URL: {vercel prod url or 'not deployed — PR not yet merged'}
 ```
 
 The closer will:
-1. Run every check in its DoD checklist (git, PR, registry, Atoll, deploy, migrations, cleanup, code hygiene, cross-tool regressions, intent verification)
+1. Run every check in its DoD checklist (git, PR, registry, tracked issue, deploy, migrations, cleanup, code hygiene, cross-tool regressions, intent verification)
 2. Emit a structured decision log: **Done / Skipped / Needs your eyes / Surprises / Verdict**
 3. Return `CLOSED` (release the pipeline) or `BLOCKED` (halt — fix the failures and re-run the closer)
 
@@ -767,10 +692,10 @@ Pipeline: {spec-name}
   [ ] Intent verification vs original ask: {ALIGNED | DRIFT — awaiting user decision}
   [ ] Preview review — latest changes (iteration {n})
   [ ] Main review — all branch changes (iteration {n})
-  [ ] Vercel preview deployed — awaiting user verification: {preview URL}
+  [ ] Preview deployed — awaiting user verification: {preview URL}
   [ ] PR created
   [ ] Post-PR review loop (iteration {n}) — comments findings on PR
-  [ ] Atoll updated + PR commented
+  [ ] Tracked issue updated + PR commented
   [ ] Registry updated
   [ ] Closer verdict: {CLOSED | BLOCKED — n failures}
 ```
@@ -780,13 +705,13 @@ For parallel runs, show all pipelines:
 ```
 Parallel Pipelines:
 
-Pipeline A: fix-timekeeping-shift-labels     @worktree-a
+Pipeline A: fix-stage-transition             @worktree-a
   [x] Spec created
   [x] Implementing...
   [ ] Testing
   ...
 
-Pipeline B: feat-timekeeping-payroll-export  @worktree-b
+Pipeline B: feat-brand-config                @worktree-b
   [x] Spec created
   [x] Spec approved
   [x] Routed to: ui-specialist
@@ -797,97 +722,14 @@ Pipeline B: feat-timekeeping-payroll-export  @worktree-b
 
 ## Git Identity
 
-All agents must use `irish@vmgdigital.com` as the git author email. The `/commit-code` skill handles this automatically, but worktree-isolated agents (implementer, ui-specialist) must also verify it in their worktree before any git operations.
+Check `git config user.email` before the first commit of a run. Use whatever email this device/account is configured to use for this repo's deploy target (check the project's own CLAUDE.md and your memory for a device-specific override — some projects require a specific author email for their deploy platform, which can differ from another repo's requirement). The `/commit-code` skill handles this automatically, but worktree-isolated agents (implementer, ui-specialist) must also verify it in their worktree before any git operations.
 
-## Atoll Board Sync (Kanban — blitz moves the card automatically)
+## Issue Tracker Sync
 
-The pipeline is a Kanban system: each issue is a card that moves left-to-right across
-the Atoll board as the pipeline advances, and the main agent (as the `blitz` identity)
-moves it **automatically** at every phase boundary. Never leave a card in the wrong
-column — the board is the shared source of truth the cloud watcher and both machines read.
+If this project uses a tracked-issue system (Atoll, Linear, GitHub Issues, etc.), the spec-architect creates the issue and subsequent agents update its status as the pipeline progresses:
+- spec created → `todo`
+- implementation started → `in_progress`
+- review started → `in_progress` or `in_review`, whichever status exists in this project's tracker — check the tracker's valid status list first, don't assume
+- PR merged + deployed → `done` + PR link commented on issue
 
-Move cards with the board helper (maps a pipeline *phase* to each project's real column;
-config in `<config-repo>/automation/board-map.json`):
-
-```bash
-ATOLL_PROFILE=blitz node <config-repo>/automation/atoll-move.mjs <IDENTIFIER> <phase> "note"
-```
-
-**Phase → column, and exactly when to fire the move:**
-
-| Pipeline moment | move phase | coal column | tool-portal column |
-| --- | --- | --- | --- |
-| Issue picked up / spec approved, queued | `ready` | `todo` | `todo` |
-| Phase 3 — implementation starts | `in_progress` | `in_progress` | `in_progress` |
-| Phase 4–4.75 — testing + QA evidence starts | `testing` | `qa` | `testing` |
-| Phase 6.5 — preview deployed, awaiting your verification | `human_gate` | `decision_gate` | `testing` |
-| Phase 5/6/6.5 check FAILS → looping back to fix | `remediation` | `in_progress` | `in_progress` |
-| Blocked on you / external | `waiting` | `waiting_on_hold` | `backlog` |
-| Phase 7 — merged + prod deployed | `done` | `done` | `done` |
-
-Fire the `testing` move **before** the testing phase runs (so watchers see it enter QA),
-and the `human_gate` move when you present the preview URL. On any remediation loop-back,
-move to `remediation` first, then re-run the failed phase. The closer (Phase 9) verifies the
-card landed in `done`.
-
-**Rules:**
-- Never touch Atoll issues assigned to Reymond (unless you claimed one via pickup).
-- The move is idempotent and cheap — run it even if you think the card is already there.
-- If a mapped column doesn't exist on a project, the move fails loudly; fix `board-map.json`
-  (or create the column with `atoll board-column create`) rather than skipping the move.
-
-## Loop Mode — drain the "ready to build" column
-
-`/workflow loop` runs the board as a queue: repeatedly pick the next eligible card and
-run its full pipeline, mirroring the board's execution loop.
-
-The loop is **non-blocking at human gates**: instead of stalling the whole queue waiting for
-you, it parks the current card in the **"waiting for human approval"** column (`human_gate`),
-posts a comment saying exactly what it needs, and moves on to the next card. You approve
-asynchronously (by comment) and the card resumes on a later cycle. This is the key difference
-from a single `/workflow` run, where the gates pause interactively.
-
-Each cycle:
-
-1. **Resume approved parked cards first.** For each of your cards in the `human_gate` column,
-   read its recent comments:
-   ```bash
-   atoll --profile blitz comment list <IDENTIFIER> --json
-   ```
-   If the newest activity includes the approval marker `WF-APPROVED` (posted by replying
-   `approve <IDENTIFIER>` in Telegram, or `atoll-claimed.mjs --approve <IDENTIFIER>` on the
-   desktop), move the card back to `in_progress` (`atoll-move.mjs <id> in_progress`) and
-   **continue its pipeline from the gate it parked at** (the parking comment records which one).
-   Cards without approval stay parked — skip them.
-
-2. **Pick the next new card:**
-   ```bash
-   ATOLL_PROFILE=blitz node <config-repo>/automation/next-card.mjs
-   ```
-   Highest-priority card assigned to you in the `ready`/`todo` column across coal + tool-portal
-   (`{ card, remaining }`). If `card` is `null` **and** nothing is parked/awaiting, the queue is
-   empty — report and stop (or, in an ambient loop, wait for the next tick).
-
-3. **Run the card.** Move it to `in_progress` and run the full single-spec pipeline (Phase 1 → 9),
-   moving it across the columns as in **Atoll Board Sync** above — including the `testing` move
-   *before* the testing phase.
-
-4. **At a human gate, park — don't block.** When the card reaches a gate:
-   - **Phase 6.5 (preview verification):** move card → `human_gate`, post a comment:
-     `Awaiting approval — preview: {url}. Reply "approve {ID}" to continue.` Then go to step 1
-     for the next card.
-   - **Phase 7 (collie permission):** move card → `human_gate`, post a comment:
-     `Awaiting approval — ready for collie review. Reply "approve {ID}" to post it.` Then go to
-     step 1. Do **not** post `collie review` until the approval marker appears (the existing
-     "ask every time, never infer" rule still holds — the approval comment is that explicit yes).
-
-5. When a card reaches `done`, loop back to step 1.
-
-**Invariant:** at most one card is actively building (`in_progress`) at a time; everything else
-is either `ready` (queued), `human_gate` (waiting on you), or `done`. This keeps the board
-readable and avoids two cards racing on shared files.
-
-Pacing: drive it with the `/loop` skill for ambient re-checks (e.g. `/loop 1h /workflow loop`),
-or run `/workflow loop` once to drain the current queue and stop. The hourly cloud watcher keeps
-feeding the `ready` column and turns your `approve` replies into resume markers, so the loop and
-the watcher together form the full board cycle: IDEA → … → HUMAN APPROVAL → DONE → (repeat).
+Skip this section entirely for a project with no issue tracker.

@@ -1,20 +1,16 @@
 # coal's Claude Code setup (backup)
 
-Backed up from `coal/.claude/` on 2026-09-10. This is **coal's own, separate**
-`/workflow` pipeline — an earlier, independently-evolved sibling of tool-portal's
-(see `../../project/.claude/`). The two are deliberately kept apart rather than
-merged: coal's pipeline predates several of tool-portal's later additions (the
-`pickup <ID>` entry mode, board-sync phases, QA-evidence harness) and has its
-own trajectory. Don't port changes between them without checking first.
+Backed up from `coal/.claude/` on 2026-09-10, updated 2026-09-11. `/workflow` and
+its 11 subagents used to live here as coal's own, separate copy (an
+independently-evolved sibling of tool-portal's — see `../../project/.claude/`).
+On 2026-09-11 the two pipelines were unified into a single global copy at
+`../../global/` (`~/.claude/commands/workflow.md` + `~/.claude/agents/`) instead,
+to stop the drift between them and avoid re-copying into every new repo. What
+remains here is coal-specific supporting material only — hooks, launch config,
+and its third-party skill pack.
 
 ## What's here
 
-- `commands/workflow.md` — coal's `/workflow` command (spec-driven pipeline:
-  spec-architect → agent-router → implementer/ui-specialist → tester →
-  intent-verifier → preview-reviewer → reviewer → pr-manager → closer).
-- `agents/` — the 11 subagents `/workflow` spawns (same roster as tool-portal's:
-  agent-router, closer, implementer, intent-verifier, pr-manager, prd-reader,
-  preview-reviewer, reviewer, spec-architect, tester, ui-specialist).
 - `hooks/` — `pre-test-verify.sh`, `secret-scan.sh`, `type-check-on-write.sh`,
   `workflow-guard.sh`.
 - `launch.json` — dev-server launch configs (`preview_start` targets) for coal
@@ -24,13 +20,16 @@ own trajectory. Don't port changes between them without checking first.
   `127.0.0.1:54321` and are the same values Supabase publishes in its own docs.
 
 - `skills/` — the third-party skill pack (`ask-matt`, `claude-handoff`,
-  `code-review`, `grilling`, `tdd`, `teach`, `wayfinder`, `wizard`, and more).
-  In coal's own checkout these live at `.agents/skills/*`, symlinked into
-  `.claude/skills/` — and coal's own `.gitignore` excludes `.agents/skills/`
-  from git (it's meant to be regenerated via coal's `setup-matt-pocock-skills`
-  command, not tracked). Included here anyway, **dereferenced into real files**
-  (not symlinks — a symlink to a path on this machine wouldn't resolve on a
-  different one) so a fresh clone doesn't depend on re-running that setup.
+  `code-review`, `tdd`, `teach`, `wayfinder`, `wizard`, and more). `grilling` was
+  removed from this pack — it's installed globally now (`../../global/skills/`),
+  since `/workflow`'s spec-grilling phase depends on it in every repo, not just
+  coal's. In coal's own checkout the rest of this pack lives at
+  `.agents/skills/*`, symlinked into `.claude/skills/` — and coal's own
+  `.gitignore` excludes `.agents/skills/` from git (it's meant to be regenerated
+  via coal's `setup-matt-pocock-skills` command, not tracked). Included here
+  anyway, **dereferenced into real files** (not symlinks — a symlink to a path
+  on this machine wouldn't resolve on a different one) so a fresh clone doesn't
+  depend on re-running that setup.
 
 ## What's deliberately NOT here
 
