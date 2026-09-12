@@ -43,13 +43,24 @@ different machine (`.claude/` is gitignored in each project repo, and user-level
 
 ## Restore on a new machine
 
-**Global commands, agents, and skills** (work in any repo — do this first):
+**Global commands, agents, and skills** (work in any repo — do this first).
+Run from anywhere; it clones to a temp dir and cleans up:
 
 ```bash
-cp global/commands/*.md ~/.claude/commands/
-mkdir -p ~/.claude/agents && cp global/agents/*.md ~/.claude/agents/
-mkdir -p ~/.claude/skills/grilling && cp -r global/skills/grilling/* ~/.claude/skills/grilling/
+git clone https://github.com/candoirish/claude-code-config.git /tmp/ccc-restore && \
+mkdir -p ~/.claude/commands ~/.claude/agents ~/.claude/skills && \
+cp /tmp/ccc-restore/global/commands/*.md ~/.claude/commands/ && \
+cp /tmp/ccc-restore/global/agents/*.md ~/.claude/agents/ && \
+cp -r /tmp/ccc-restore/global/skills/grilling ~/.claude/skills/ && \
+rm -rf /tmp/ccc-restore && \
+echo "✅ Restored commands, agents, and grilling skill to ~/.claude/"
 ```
+
+> **Note:** all three target dirs must exist before copying — `mkdir -p` above
+> creates `commands`, `agents`, and `skills` in one go. (The earlier version of
+> this snippet skipped `~/.claude/commands`, so the first `cp` failed.) If you'd
+> rather copy from an existing local checkout, `cd` into it first and drop the
+> `git clone`/`rm -rf` lines.
 
 **Project-scoped remainder** (hooks, QA harness, coal's skill pack — only inside
 the matching checkout):
@@ -65,6 +76,7 @@ every fresh clone.
 On **macOS/Linux** the same commands work as written. On **Windows (PowerShell)** use:
 
 ```powershell
+New-Item -ItemType Directory -Force $HOME\.claude\commands | Out-Null
 Copy-Item global\commands\*.md $HOME\.claude\commands\
 New-Item -ItemType Directory -Force $HOME\.claude\agents | Out-Null
 Copy-Item global\agents\*.md $HOME\.claude\agents\
